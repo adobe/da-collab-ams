@@ -154,21 +154,20 @@ export async function handleApiRequest(request, env) {
     auth = url.searchParams.get('Authorization');
   }
 
+  const adminOrigin = env.ADMIN_ORIGIN || 'BAD_VAR_daCollab_ADMIN_ORIGIN';
+
   // We need to massage the path somewhat because on connections from localhost safari sends
   // a path with only one slash for some reason.
   let docName = request.url.substring(new URL(request.url).origin.length + 1)
-    .replace('https:/admin.da.page', 'https://admin.da.page')
-    .replace('https:/admin.da.live', 'https://admin.da.live')
+    .replace(`https:/${adminOrigin.replace(/^https?:\/\//, '')}`, adminOrigin)
     .replace('http:/localhost', 'http://localhost');
 
   if (docName.indexOf('?') > 0) {
     docName = docName.substring(0, docName.indexOf('?'));
   }
 
-  // Make sure we only work with da.live, da.page or localhost
-  if (!docName.startsWith('https://admin.da.live/')
-      && !docName.startsWith('https://admin.da.page/')
-      && !docName.startsWith('https://stage-admin.da.live/')
+  // Make sure we only work with the configured admin origin or localhost
+  if (!docName.startsWith(`${adminOrigin}/`)
       && !docName.startsWith('http://localhost:')) {
     return new Response('unable to get resource', { status: 404 });
   }

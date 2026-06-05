@@ -58,3 +58,28 @@ ADMIN_ORIGIN = "https://admin.ssa-da.live"
 VERSION = "@@VERSION@@"
 CF_ACCOUNT_ID = "REPLACE_WITH_GOV_PROD_ACCOUNT_ID"
 RETURN_STACK_TRACES = "false"
+
+# === ENT-AEM ===
+[env.ent-aem]
+account_id = "ff68e0f71563bc546fedcfda6bd8e5ca"
+keep_vars = true
+routes = [{ pattern = "collab.ent-da.live/*", zone_name = "ent-da.live" }]
+
+services = [
+  { binding = "daadmin", service = "da-admin-ams-ent-aem" }
+]
+
+[env.ent-aem.durable_objects]
+bindings = [{ name = "rooms", class_name = "DocRoom" }]
+
+[[env.ent-aem.migrations]]
+tag = "v1"
+new_classes = ["DocRoom"]
+
+[env.ent-aem.vars]
+ENVIRONMENT = "ent-aem"
+DA_DOMAIN = "ent-da.live"
+ADMIN_ORIGIN = "https://admin.ent-da.live"
+VERSION = "@@VERSION@@"
+CF_ACCOUNT_ID = "ff68e0f71563bc546fedcfda6bd8e5ca"
+RETURN_STACK_TRACES = "false"

@@ -689,7 +689,7 @@ describe('Worker test suite', () => {
     const headers = new Map();
     headers.set('myheader', 'myval');
     const req = {
-      url: 'http://do.re.mi/https://admin.da.live/laaa.html?Authorization=qrtoefi',
+      url: 'http://do.re.mi/https://admin.ent-da.live/laaa.html?Authorization=qrtoefi',
       headers,
     };
 
@@ -713,37 +713,37 @@ describe('Worker test suite', () => {
 
     const rooms = {
       idFromName(nm) { return `id${hash(nm)}`; },
-      get(id) { return id === 'id1255893316' ? myRoom : null; },
+      get(id) { return id === 'id-862952478' ? myRoom : null; },
     };
-    const env = { rooms, daadmin: serviceBinding, ADMIN_ORIGIN: 'https://admin.da.live' };
+    const env = { rooms, daadmin: serviceBinding, ADMIN_ORIGIN: 'https://admin.ent-da.live' };
 
     const res = await handleApiRequest(req, env);
     assert.equal(306, res.status);
 
     assert.equal(1, mockFetchCalled.length);
     const mfreq = mockFetchCalled[0];
-    assert.equal('https://admin.da.live/laaa.html', mfreq.url);
+    assert.equal('https://admin.ent-da.live/laaa.html', mfreq.url);
     assert.equal('HEAD', mfreq.opts.method);
 
     assert.equal(1, roomFetchCalled.length);
 
     const rfreq = roomFetchCalled[0];
-    assert.equal('https://admin.da.live/laaa.html', rfreq.url);
+    assert.equal('https://admin.ent-da.live/laaa.html', rfreq.url);
     assert.equal('qrtoefi', rfreq.headers.get('Authorization'));
     assert.equal('myval', rfreq.headers.get('myheader'));
-    assert.equal('https://admin.da.live/laaa.html', rfreq.headers.get('X-collab-room'));
+    assert.equal('https://admin.ent-da.live/laaa.html', rfreq.headers.get('X-collab-room'));
   });
 
   it('Test handleApiRequest via Service Binding (param auth)', async () => {
     const req = {
-      url: 'http://do.re.mi/https://admin.da.live/laaa.html?Authorization=lala',
+      url: 'http://do.re.mi/https://admin.ent-da.live/laaa.html?Authorization=lala',
       headers: new Headers(),
     };
 
     // eslint-disable-next-line consistent-return
     const mockFetch = async (url, opts) => {
       if (opts.method === 'HEAD'
-        && url === 'https://admin.da.live/laaa.html'
+        && url === 'https://admin.ent-da.live/laaa.html'
         && opts.headers.get('Authorization') === 'lala') {
         return new Response(null, { status: 410 });
       }
@@ -752,7 +752,7 @@ describe('Worker test suite', () => {
     // This is how a service binding is exposed to the program, via env
     const env = {
       daadmin: { fetch: mockFetch },
-      ADMIN_ORIGIN: 'https://admin.da.live',
+      ADMIN_ORIGIN: 'https://admin.ent-da.live',
     };
 
     const res = await handleApiRequest(req, env);
@@ -761,7 +761,7 @@ describe('Worker test suite', () => {
 
   it('Test handleApiRequest via Service Binding (header auth)', async () => {
     const req = {
-      url: 'http://do.re.mi/https://admin.da.live/laaa.html',
+      url: 'http://do.re.mi/https://admin.ent-da.live/laaa.html',
       headers: new Headers({
         'sec-websocket-protocol': 'yjs,test-token',
       }),
@@ -793,7 +793,7 @@ describe('Worker test suite', () => {
     const env = {
       daadmin: { fetch: mockDaAdminFetch },
       rooms,
-      ADMIN_ORIGIN: 'https://admin.da.live',
+      ADMIN_ORIGIN: 'https://admin.ent-da.live',
     };
 
     const res = await handleApiRequest(req, env);
@@ -816,13 +816,13 @@ describe('Worker test suite', () => {
 
   it('Test handleApiRequest document not found (404)', async () => {
     const req = {
-      url: 'http://do.re.mi/https://admin.da.live/nonexistent.html',
+      url: 'http://do.re.mi/https://admin.ent-da.live/nonexistent.html',
       headers: new Headers(),
     };
 
     const mockFetch = async (url, opts) => new Response(null, { status: 404 });
     const daadmin = { fetch: mockFetch };
-    const env = { daadmin, ADMIN_ORIGIN: 'https://admin.da.live' };
+    const env = { daadmin, ADMIN_ORIGIN: 'https://admin.ent-da.live' };
 
     const res = await handleApiRequest(req, env);
     assert.equal(404, res.status);
@@ -831,13 +831,13 @@ describe('Worker test suite', () => {
 
   it('Test handleApiRequest not authorized (non-WS)', async () => {
     const req = {
-      url: 'http://do.re.mi/https://admin.da.live/hihi.html',
+      url: 'http://do.re.mi/https://admin.ent-da.live/hihi.html',
       headers: new Headers(),
     };
 
     const mockFetch = async (url, opts) => new Response(null, { status: 401 });
     const daadmin = { fetch: mockFetch };
-    const env = { daadmin, ADMIN_ORIGIN: 'https://admin.da.live' };
+    const env = { daadmin, ADMIN_ORIGIN: 'https://admin.ent-da.live' };
 
     const res = await handleApiRequest(req, env);
     assert.equal(401, res.status);
@@ -845,10 +845,10 @@ describe('Worker test suite', () => {
 
   async function testWsUpgradeAuthFailure(httpStatus, expectedCode, expectedReason, protocol) {
     const req = {
-      url: 'http://do.re.mi/https://admin.da.live/hihi.html',
+      url: 'http://do.re.mi/https://admin.ent-da.live/hihi.html',
       headers: new Headers({ Upgrade: 'websocket', 'sec-websocket-protocol': protocol }),
     };
-    const env = { daadmin: { fetch: async () => new Response(null, { status: httpStatus }) } };
+    const env = { daadmin: { fetch: async () => new Response(null, { status: httpStatus }) }, ADMIN_ORIGIN: 'https://admin.ent-da.live' };
 
     const ops = [];
     let triggerMessage;
@@ -930,7 +930,7 @@ describe('Worker test suite', () => {
 
   it('Test handleApiRequest da-admin fetch exception', async () => {
     const req = {
-      url: 'http://do.re.mi/https://admin.da.live/test.html',
+      url: 'http://do.re.mi/https://admin.ent-da.live/test.html',
       headers: new Headers(),
     };
 
@@ -939,7 +939,7 @@ describe('Worker test suite', () => {
       throw new Error('Network error');
     };
     const daadmin = { fetch: mockFetch };
-    const env = { daadmin, ADMIN_ORIGIN: 'https://admin.da.live' };
+    const env = { daadmin, ADMIN_ORIGIN: 'https://admin.ent-da.live' };
 
     const res = await handleApiRequest(req, env);
     assert.equal(500, res.status);
@@ -948,7 +948,7 @@ describe('Worker test suite', () => {
 
   it('Test handleApiRequest room object fetch exception', async () => {
     const req = {
-      url: 'http://do.re.mi/https://admin.da.live/test.html',
+      url: 'http://do.re.mi/https://admin.ent-da.live/test.html',
       headers: new Headers(),
     };
 
@@ -977,7 +977,7 @@ describe('Worker test suite', () => {
     const env = {
       daadmin: { fetch: mockDaAdminFetch },
       rooms,
-      ADMIN_ORIGIN: 'https://admin.da.live',
+      ADMIN_ORIGIN: 'https://admin.ent-da.live',
     };
 
     const res = await handleApiRequest(req, env);
@@ -1254,7 +1254,7 @@ describe('Worker test suite', () => {
       idFromName(nm) { return `id${hash(nm)}`; },
       get() { return myRoom; },
     };
-    const env = { rooms, daadmin };
+    const env = { rooms, daadmin, ADMIN_ORIGIN: 'https://admin.ent-da.live' };
 
     try {
       const req = {
@@ -1304,11 +1304,11 @@ describe('Worker test suite', () => {
       idFromName(nm) { return `id${hash(nm)}`; },
       get() { return myRoom; },
     };
-    const env = { rooms, daadmin };
+    const env = { rooms, daadmin, ADMIN_ORIGIN: 'https://admin.ent-da.live' };
 
     try {
       const req = {
-        url: 'http://do.re.mi/https://admin.da.live/some.html',
+        url: 'http://do.re.mi/https://admin.ent-da.live/some.html',
         headers: new Headers(),
       };
       const res = await handleApiRequest(req, env);
@@ -1393,7 +1393,7 @@ describe('Worker test suite', () => {
       const dr = new DocRoom(makeCtx(null), { daadmin: {} });
       const headers = new Headers({
         Upgrade: 'websocket',
-        'X-collab-room': 'https://admin.da.live/foo.html',
+        'X-collab-room': 'https://admin.ent-da.live/foo.html',
         'X-auth-actions': 'read',
       });
       const req = { headers, url: 'http://localhost:4711/' };
@@ -1407,7 +1407,7 @@ describe('Worker test suite', () => {
     }
   });
 
-  it('Test DocRoom routes an api.aem.live doc to bindState (Helix backend derived from URL)', async () => {
+  it('Test DocRoom routes an api.ent-aem.live doc to bindState (Helix backend derived from URL)', async () => {
     const savedNWSP = DocRoom.newWebSocketPair;
     const savedBS = persistence.bindState;
 

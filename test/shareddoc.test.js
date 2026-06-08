@@ -494,7 +494,7 @@ describe('Collab Test Suite', () => {
       },
     });
 
-    const docName = 'https://admin.da.live/source/reentrant.html';
+    const docName = 'https://admin.ent-da.live/source/reentrant.html';
     const storage = { list: async () => new Map() };
     const ydoc = new pss.WSSharedDoc(docName);
     pss.setYDoc(docName, ydoc);
@@ -614,7 +614,7 @@ describe('Collab Test Suite', () => {
   });
 
   it('Test persistence update closes all and cleans storage on 412', async () => {
-    const docName = 'https://admin.da.live/source/foo.html';
+    const docName = 'https://admin.ent-da.live/source/foo.html';
     const ydoc = new WSSharedDoc(docName);
 
     const storageDeleteAllCalled = [];
@@ -657,7 +657,7 @@ describe('Collab Test Suite', () => {
   });
 
   it('Test 412 cleanup allows fresh connection attempt', async () => {
-    const docName = 'https://admin.da.live/source/bar.html';
+    const docName = 'https://admin.ent-da.live/source/bar.html';
 
     // First connection and 412 scenario
     const ydoc = new WSSharedDoc(docName);
@@ -691,7 +691,7 @@ describe('Collab Test Suite', () => {
   });
 
   it('Test ydoc error map is set on 412', async () => {
-    const docName = 'https://admin.da.live/source/baz.html';
+    const docName = 'https://admin.ent-da.live/source/baz.html';
     const ydoc = new WSSharedDoc(docName);
     ydoc.storage = { deleteAll: async () => {} };
 
@@ -731,7 +731,7 @@ describe('Collab Test Suite', () => {
       },
     });
 
-    const docName = 'https://admin.da.live/source/qux.html';
+    const docName = 'https://admin.ent-da.live/source/qux.html';
     const ydoc = new pss.WSSharedDoc(docName);
     ydoc.storage = { deleteAll: async () => {} };
 
@@ -802,7 +802,7 @@ describe('Collab Test Suite', () => {
   });
 
   it('Test 412 closes all clients including readonly', async () => {
-    const docName = 'https://admin.da.live/source/multi.html';
+    const docName = 'https://admin.ent-da.live/source/multi.html';
     const ydoc = new WSSharedDoc(docName);
     ydoc.storage = { deleteAll: async () => {} };
 
@@ -975,7 +975,7 @@ describe('Collab Test Suite', () => {
       },
     });
 
-    const docName = 'https://admin.da.live/source/flush-noop.html';
+    const docName = 'https://admin.ent-da.live/source/flush-noop.html';
     const storage = { list: async () => new Map() };
     const ydoc = new pss.WSSharedDoc(docName);
     pss.setYDoc(docName, ydoc);
@@ -1016,7 +1016,7 @@ describe('Collab Test Suite', () => {
       },
     });
 
-    const docName = 'https://admin.da.live/source/flush-saves.html';
+    const docName = 'https://admin.ent-da.live/source/flush-saves.html';
     const storage = { list: async () => new Map() };
     const ydoc = new pss.WSSharedDoc(docName);
     pss.setYDoc(docName, ydoc);
@@ -1053,7 +1053,7 @@ describe('Collab Test Suite', () => {
       '../src/debounce.js': { default: mockdebounce },
     });
 
-    const docName = 'https://admin.da.live/source/flush-cancel.html';
+    const docName = 'https://admin.ent-da.live/source/flush-cancel.html';
     const storage = { list: async () => new Map() };
     const ydoc = new pss.WSSharedDoc(docName);
     pss.setYDoc(docName, ydoc);
@@ -1090,7 +1090,7 @@ describe('Collab Test Suite', () => {
       },
     });
 
-    const docName = 'https://admin.da.live/source/flush-inflight.html';
+    const docName = 'https://admin.ent-da.live/source/flush-inflight.html';
     const storage = { list: async () => new Map() };
     const ydoc = new pss.WSSharedDoc(docName);
     pss.setYDoc(docName, ydoc);
@@ -1358,7 +1358,7 @@ describe('Collab Test Suite', () => {
   });
 
   it('Test bindstate read from worker storage for doc', async () => {
-    const docName = 'https://admin.da.live/source/foo/bar.html';
+    const docName = 'https://admin.ent-da.live/source/foo/bar.html';
 
     // Prepare the (mocked) storage
     const testDoc = new Y.Doc();
@@ -1397,7 +1397,7 @@ describe('Collab Test Suite', () => {
   });
 
   it('Test bindstate read from worker storage for json', async () => {
-    const docName = 'https://admin.da.live/source/foo/bar.json';
+    const docName = 'https://admin.ent-da.live/source/foo/bar.json';
 
     // Prepare the (mocked) storage: empty ydoc (no sheets data) so doc2json(ydoc) === '{}'
     const testDoc = new Y.Doc();
@@ -1428,7 +1428,7 @@ describe('Collab Test Suite', () => {
   });
 
   it('Test bindstate falls back to daadmin on worker storage error', async () => {
-    const docName = 'https://admin.da.live/source/foo/bar.html';
+    const docName = 'https://admin.ent-da.live/source/foo/bar.html';
     const ydoc = new Y.Doc();
     setYDoc(docName, ydoc);
 
@@ -1470,7 +1470,7 @@ describe('Collab Test Suite', () => {
       },
     });
 
-    const docName = 'https://admin.da.live/source/foo/bar.html';
+    const docName = 'https://admin.ent-da.live/source/foo/bar.html';
     const storage = { list: async () => new Map() };
     const updObservers = [];
     const ydoc = new Y.Doc();
@@ -1531,7 +1531,7 @@ describe('Collab Test Suite', () => {
       },
     });
 
-    const docName = 'https://admin.da.live/source/foo/bar.html';
+    const docName = 'https://admin.ent-da.live/source/foo/bar.html';
     const storage = { list: async () => new Map() };
     const updObservers = [];
     const ydoc = new Y.Doc();
@@ -1586,7 +1586,7 @@ describe('Collab Test Suite', () => {
   });
 
   it('test persist state in worker storage on update', async () => {
-    const docName = 'https://admin.da.live/source/foo/bar.html';
+    const docName = 'https://admin.ent-da.live/source/foo/bar.html';
 
     const updObservers = [];
     const ydoc = new Y.Doc();
@@ -2273,7 +2273,7 @@ describe('Collab Test Suite', () => {
   });
 
   it('test no empty document if daadmin fetch crashes', async () => {
-    const docName = 'https://admin.da.live/source/foo/bar.html';
+    const docName = 'https://admin.ent-da.live/source/foo/bar.html';
 
     const updObservers = [];
     const ydoc = new Y.Doc();
@@ -2347,7 +2347,7 @@ describe('Collab Test Suite', () => {
   });
 
   it('Test bindstate restores from CF storage when ahead of da-admin (pending unsaved changes)', async () => {
-    const docName = 'https://admin.da.live/source/foo/bar.html';
+    const docName = 'https://admin.ent-da.live/source/foo/bar.html';
 
     const daAdminContent = '<body>\n  <header></header>\n  <main><div><p>original</p></div></main>\n  <footer></footer>\n</body>\n';
 
@@ -2393,7 +2393,7 @@ describe('Collab Test Suite', () => {
   });
 
   it('bindState writes lastsync after initial da-admin restore so a later DO reset can recover pending changes', async () => {
-    const docName = 'https://admin.da.live/source/foo/bar.html';
+    const docName = 'https://admin.ent-da.live/source/foo/bar.html';
     const daAdminContent = '<body>\n  <header></header>\n  <main><div><p>synced</p></div></main>\n  <footer></footer>\n</body>\n';
 
     const ydoc = new Y.Doc();
@@ -2585,7 +2585,7 @@ describe('Collab Test Suite', () => {
       },
     });
 
-    const docName = 'https://admin.da.live/source/skip-save.html';
+    const docName = 'https://admin.ent-da.live/source/skip-save.html';
     const storage = { list: async () => new Map() };
     const updObservers = [];
     const ydoc = new pss.WSSharedDoc(docName);
@@ -2645,12 +2645,12 @@ describe('Collab Test Suite', () => {
         return 'da-resp';
       },
     };
-    const backend = getBackend('https://admin.da.live/x.html', daadmin);
-    const resp = await backend.fetch('https://admin.da.live/x.html', { method: 'HEAD' });
+    const backend = getBackend('https://admin.ent-da.live/x.html', daadmin);
+    const resp = await backend.fetch('https://admin.ent-da.live/x.html', { method: 'HEAD' });
 
     assert.equal('da-resp', resp);
     assert.equal(1, calls.length);
-    assert.equal('https://admin.da.live/x.html', calls[0].url);
+    assert.equal('https://admin.ent-da.live/x.html', calls[0].url);
   });
 
   it('getBackend routes api.ent-aem.live docs through the global fetch', async () => {
@@ -2676,7 +2676,7 @@ describe('Collab Test Suite', () => {
   });
 
   it('getBackend.putReqData builds multipart form-data for da-admin docs', () => {
-    const backend = getBackend('https://admin.da.live/x.html', {});
+    const backend = getBackend('https://admin.ent-da.live/x.html', {});
     const { body, size, headers } = backend.putReqData('hello world', 'text/html');
 
     assert(body instanceof FormData, 'da-admin PUT body must be FormData');
@@ -2695,7 +2695,7 @@ describe('Collab Test Suite', () => {
 
   it('isHelixDoc is true only for api.ent-aem.live doc URLs', () => {
     assert.equal(isHelixDoc('https://api.ent-aem.live/o/r/p.html'), true);
-    assert.equal(isHelixDoc('https://admin.da.live/x.html'), false);
+    assert.equal(isHelixDoc('https://admin.ent-da.live/x.html'), false);
     assert.equal(isHelixDoc('http://localhost:8080/x.html'), false);
   });
 
@@ -2795,7 +2795,7 @@ describe('Collab Test Suite', () => {
     };
     const conns = new Map();
     conns.set({ auth: 'a' }, new Set());
-    const ydoc = { name: 'https://admin.da.live/source/x.html', conns, daadmin };
+    const ydoc = { name: 'https://admin.ent-da.live/source/x.html', conns, daadmin };
     const body = 'plain html content larger than empty stub padding padding padding padding padding padding';
     await persistence.put(ydoc, body);
 

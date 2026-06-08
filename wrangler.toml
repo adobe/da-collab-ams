@@ -1,84 +1,85 @@
-name = "da-collab"
-workers_dev = true
-compatibility_date = "2023-10-30"
+name = "da-collab-ams"
 main = "src/edge.js"
-keep_vars = true
+compatibility_date = "2023-10-30"
 
 [dev]
-port = 4711
+port = 8789
 
-[[migrations]]
-tag = "v1" # Should be unique for each entry
+# Secrets (set via: wrangler secret put SECRET_NAME --env ENVIRONMENT)
+# Required per environment:
+# - COLLAB_SHARED_SECRET  (protects /api/v1/syncadmin and /api/v1/deleteadmin)
+
+# === GOV STAGE ===
+[env.gov-stage]
+account_id = "980b8b7745c7f2165f369b9d6f3c61f5"
+keep_vars = true
+routes = [{ pattern = "stg-collab.ssa-da.live/*", zone_name = "ssa-da.live" }]
+
+services = [
+  { binding = "daadmin", service = "da-admin-ams-gov-stage" }
+]
+
+[env.gov-stage.durable_objects]
+bindings = [{ name = "rooms", class_name = "DocRoom" }]
+
+[[env.gov-stage.migrations]]
+tag = "v1"
 new_classes = ["DocRoom"]
 
-# ----------------------------------------------------------------------
-# production environment
-[env.production]
-name = "da-collab"
-
-services = [
-  { binding = "daadmin", service = "da-admin" }
-]
-
-[[env.production.durable_objects.bindings]]
-name = "rooms"
-class_name = "DocRoom"
-
-[env.production.vars]
-ENVIRONMENT = "production"
+[env.gov-stage.vars]
+ENVIRONMENT = "gov-stage"
+DA_DOMAIN = "stg.ssa-da.live"
+ADMIN_ORIGIN = "https://stg-admin.ssa-da.live"
 VERSION = "@@VERSION@@"
+CF_ACCOUNT_ID = "980b8b7745c7f2165f369b9d6f3c61f5"
 RETURN_STACK_TRACES = "false"
 
-# ----------------------------------------------------------------------
-# stage environment
-[env.stage]
-name = "da-collab-stage"
+# === GOV PROD ===
+[env.gov-prod]
+account_id = "REPLACE_WITH_GOV_PROD_ACCOUNT_ID"
+keep_vars = true
+routes = [{ pattern = "collab.ssa-da.live/*", zone_name = "ssa-da.live" }]
 
 services = [
-  { binding = "daadmin", service = "da-admin-stage" }
+  { binding = "daadmin", service = "da-admin-ams-gov-prod" }
 ]
 
-[[env.stage.durable_objects.bindings]]
-name = "rooms"
-class_name = "DocRoom"
+[env.gov-prod.durable_objects]
+bindings = [{ name = "rooms", class_name = "DocRoom" }]
 
-[env.stage.vars]
-ENVIRONMENT = "stage"
-VERSION="@@VERSION@@-stage"
+[[env.gov-prod.migrations]]
+tag = "v1"
+new_classes = ["DocRoom"]
+
+[env.gov-prod.vars]
+ENVIRONMENT = "gov-prod"
+DA_DOMAIN = "ssa-da.live"
+ADMIN_ORIGIN = "https://admin.ssa-da.live"
+VERSION = "@@VERSION@@"
+CF_ACCOUNT_ID = "REPLACE_WITH_GOV_PROD_ACCOUNT_ID"
 RETURN_STACK_TRACES = "false"
 
-# ----------------------------------------------------------------------
-# ci environment
-[env.ci]
-name = "da-collab-ci"
+# === ENT-AEM ===
+[env.ent-aem]
+account_id = "ff68e0f71563bc546fedcfda6bd8e5ca"
+keep_vars = true
+routes = [{ pattern = "collab.ent-da.live/*", zone_name = "ent-da.live" }]
 
 services = [
-  { binding = "daadmin", service = "da-admin-stage" }
+  { binding = "daadmin", service = "da-admin-ams-ent-aem" }
 ]
 
-[[env.ci.durable_objects.bindings]]
-name = "rooms"
-class_name = "DocRoom"
+[env.ent-aem.durable_objects]
+bindings = [{ name = "rooms", class_name = "DocRoom" }]
 
-[env.ci.vars]
-ENVIRONMENT = "ci"
-VERSION="@@VERSION@@-ci"
+[[env.ent-aem.migrations]]
+tag = "v1"
+new_classes = ["DocRoom"]
+
+[env.ent-aem.vars]
+ENVIRONMENT = "ent-aem"
+DA_DOMAIN = "ent-da.live"
+ADMIN_ORIGIN = "https://admin.ent-da.live"
+VERSION = "@@VERSION@@"
+CF_ACCOUNT_ID = "ff68e0f71563bc546fedcfda6bd8e5ca"
 RETURN_STACK_TRACES = "false"
-
-# ----------------------------------------------------------------------
-# dev environment (local)
-[env.dev]
-name = "da-collab-local"
-
-services = [
-  { binding = "daadmin", service = "da-admin-local" }
-]
-
-[[env.dev.durable_objects.bindings]]
-name = "rooms"
-class_name = "DocRoom"
-
-[env.dev.vars]
-ENVIRONMENT = "dev"
-VERSION="0.0.0-dev"
-RETURN_STACK_TRACES = "true"

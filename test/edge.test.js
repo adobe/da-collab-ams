@@ -678,7 +678,7 @@ describe('Worker test suite', () => {
       idFromName(nm) { return `id${hash(nm)}`; },
       get(id) { return id === 'id1255893316' ? myRoom : null; },
     };
-    const env = { rooms, daadmin: serviceBinding };
+    const env = { rooms, daadmin: serviceBinding, ADMIN_ORIGIN: 'https://admin.da.live' };
 
     const res = await handleApiRequest(req, env);
     assert.equal(306, res.status);
@@ -715,6 +715,7 @@ describe('Worker test suite', () => {
     // This is how a service binding is exposed to the program, via env
     const env = {
       daadmin: { fetch: mockFetch },
+      ADMIN_ORIGIN: 'https://admin.da.live',
     };
 
     const res = await handleApiRequest(req, env);
@@ -755,6 +756,7 @@ describe('Worker test suite', () => {
     const env = {
       daadmin: { fetch: mockDaAdminFetch },
       rooms,
+      ADMIN_ORIGIN: 'https://admin.da.live',
     };
 
     const res = await handleApiRequest(req, env);
@@ -783,7 +785,7 @@ describe('Worker test suite', () => {
 
     const mockFetch = async (url, opts) => new Response(null, { status: 404 });
     const daadmin = { fetch: mockFetch };
-    const env = { daadmin };
+    const env = { daadmin, ADMIN_ORIGIN: 'https://admin.da.live' };
 
     const res = await handleApiRequest(req, env);
     assert.equal(404, res.status);
@@ -798,7 +800,7 @@ describe('Worker test suite', () => {
 
     const mockFetch = async (url, opts) => new Response(null, { status: 401 });
     const daadmin = { fetch: mockFetch };
-    const env = { daadmin };
+    const env = { daadmin, ADMIN_ORIGIN: 'https://admin.da.live' };
 
     const res = await handleApiRequest(req, env);
     assert.equal(401, res.status);
@@ -815,7 +817,7 @@ describe('Worker test suite', () => {
       throw new Error('Network error');
     };
     const daadmin = { fetch: mockFetch };
-    const env = { daadmin };
+    const env = { daadmin, ADMIN_ORIGIN: 'https://admin.da.live' };
 
     const res = await handleApiRequest(req, env);
     assert.equal(500, res.status);
@@ -853,6 +855,7 @@ describe('Worker test suite', () => {
     const env = {
       daadmin: { fetch: mockDaAdminFetch },
       rooms,
+      ADMIN_ORIGIN: 'https://admin.da.live',
     };
 
     const res = await handleApiRequest(req, env);

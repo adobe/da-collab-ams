@@ -10,6 +10,9 @@
  * governing permissions and limitations under the License.
  */
 import * as Y from 'yjs';
+import * as syncProtocol from 'y-protocols/sync.js';
+import * as encoding from 'lib0/encoding.js';
+import * as decoding from 'lib0/decoding.js';
 import assert from 'node:assert';
 import esmock from 'esmock';
 
@@ -17,7 +20,9 @@ import {
   aem2doc, doc2aem, doc2json, EMPTY_DOC,
 } from '@da-tools/da-parser';
 import {
-  closeConn, getYDoc, invalidateFromAdmin, messageListener, persistence,
+  closeConn, getBackend, getYDoc, isHelixDoc,
+  invalidateFromAdmin, isExpectedPlatformEvent, messageFlushRequest,
+  messageFlushResponse, messageListener, persistence,
   readState, setupWSConnection, setYDoc, showError, storeState, updateHandler, WSSharedDoc,
 } from '../src/shareddoc.js';
 
@@ -186,6 +191,7 @@ describe('Collab Test Suite', () => {
       assert.fail('Should have thrown an error');
     } catch (error) {
       assert(error.toString().includes('unable to get resource - status: 404'));
+      assert.equal(404, error.status, 'Error must carry the HTTP status for upstream propagation');
     }
   });
 
@@ -205,6 +211,33 @@ describe('Collab Test Suite', () => {
     } catch (error) {
       // expected
       assert(error.toString().includes('unable to get resource - status: 500'));
+      assert.equal(500, error.status, 'Error must carry the HTTP status for upstream propagation');
+    }
+  });
+
+  it('Test persistence get 401 carries status for propagation', async () => {
+    const daadmin = {
+      fetch: async () => ({ ok: false, status: 401, statusText: 'Unauthorized' }),
+    };
+    try {
+      await persistence.get('foo', 'auth', daadmin);
+      assert.fail('Should have thrown an error');
+    } catch (error) {
+      assert.equal(401, error.status, 'Error must carry 401 status');
+      assert(error.message.includes('401'));
+    }
+  });
+
+  it('Test persistence get 403 carries status for propagation', async () => {
+    const daadmin = {
+      fetch: async () => ({ ok: false, status: 403, statusText: 'Forbidden' }),
+    };
+    try {
+      await persistence.get('foo', 'auth', daadmin);
+      assert.fail('Should have thrown an error');
+    } catch (error) {
+      assert.equal(403, error.status, 'Error must carry 403 status');
+      assert(error.message.includes('403'));
     }
   });
 
@@ -329,6 +362,7 @@ describe('Collab Test Suite', () => {
     const mockYDoc = {
       conns: { keys() { return [{}]; } },
       name: 'http://foo.bar/0/123.html',
+      hasClientChanged: true,
     };
 
     let called = false;
@@ -361,6 +395,7 @@ describe('Collab Test Suite', () => {
     const mockYDoc = {
       conns: new Map().set('foo', 'bar'),
       name: 'http://foo.bar/0/123.html',
+      hasClientChanged: true,
       getMap(nm) { return nm === 'error' ? new Map() : null; },
       transact: (f) => f(),
     };
@@ -389,6 +424,193 @@ describe('Collab Test Suite', () => {
   it('Test persistence update closes all on auth failure', async () => {
     await testCloseAllOnAuthFailure(401);
     await testCloseAllOnAuthFailure(403);
+  });
+
+  async function testUpdateLogLevel(status, statusText, expectedLevel) {
+    const pss = await esmock('../src/shareddoc.js', {
+      '@da-tools/da-parser': { doc2aem: () => 'updated content' },
+    });
+    const mockYDoc = {
+      conns: new Map(),
+      name: 'http://foo.bar/log-level.html',
+      hasClientChanged: true,
+      getMap(nm) { return nm === 'error' ? new Map() : null; },
+      transact: (f) => f(),
+    };
+    pss.persistence.put = async () => ({ ok: false, status, statusText });
+    pss.persistence.closeConn = () => {};
+
+    const logged = [];
+    const origWarn = console.warn;
+    const origLog = console.log;
+    const origError = console.error;
+    console.warn = (...a) => logged.push(['warn', ...a]);
+    console.log = (...a) => logged.push(['log', ...a]);
+    console.error = (...a) => logged.push(['error', ...a]);
+    try {
+      await pss.persistence.update(mockYDoc, 'old content', 'log-level.html');
+    } finally {
+      console.warn = origWarn;
+      console.log = origLog;
+      console.error = origError;
+    }
+
+    const updateLog = logged.find(([, msg]) => msg === '[docroom] Failed to update document');
+    assert(updateLog, `Expected a log entry for status ${status}`);
+    assert.equal(updateLog[0], expectedLevel, `Expected '${expectedLevel}' for status ${status}`);
+    if (expectedLevel !== 'error') {
+      assert.equal(typeof updateLog[3], 'string', `Expected string message for status ${status}, not an Error object`);
+    }
+  }
+
+  it('Test persistence update logs console.warn (no stack) on 401', async () => {
+    await testUpdateLogLevel(401, 'Unauthorized', 'warn');
+  });
+
+  it('Test persistence update logs console.log (no stack) on 403', async () => {
+    await testUpdateLogLevel(403, 'Forbidden', 'log');
+  });
+
+  it('Test persistence update logs console.error (with stack) on other failures', async () => {
+    await testUpdateLogLevel(500, 'Internal Server Error', 'error');
+  });
+
+  it('closeConn called re-entrantly from persistence.update closeAll skips flushSave without deadlock', async () => {
+    // Regression guard: when persistence.update closes all connections after a 401/403,
+    // closeConn must skip flushSave (isReentrant=true). Awaiting flushSave here would
+    // deadlock because savingPromise cannot resolve until persistence.update returns.
+    const mockdebounce = (f) => {
+      const debounced = async () => f();
+      debounced.cancel = () => {};
+      return debounced;
+    };
+    const pss = await esmock('../src/shareddoc.js', {
+      '../src/debounce.js': { default: mockdebounce },
+      '@da-tools/da-parser': {
+        doc2aem: () => '<main><div><p>content</p></div></main>',
+        doc2json: () => '{}',
+        aem2doc,
+        json2doc: () => {},
+      },
+    });
+
+    const docName = 'https://admin.da.live/source/reentrant.html';
+    const storage = { list: async () => new Map() };
+    const ydoc = new pss.WSSharedDoc(docName);
+    pss.setYDoc(docName, ydoc);
+
+    pss.persistence.get = async () => '<main><div><p>initial</p></div></main>';
+
+    let putResolved = false;
+    pss.persistence.put = async () => ({ ok: false, status: 401, statusText: 'Unauthorized' });
+
+    const conn = { auth: undefined, close() {} };
+    await pss.persistence.bindState(docName, ydoc, conn, storage);
+    ydoc.hasClientChanged = true;
+
+    // This must resolve — no deadlock — even though closeConn is called
+    // from within persistence.update while the save is in-flight.
+    const result = await Promise.race([
+      ydoc.flushSave().then(() => 'resolved'),
+      new Promise((r) => { setTimeout(r, 500, 'timeout'); }),
+    ]);
+    putResolved = true;
+    assert.equal(result, 'resolved', 'flushSave must resolve; deadlock detected if timeout fires');
+    assert(putResolved);
+  });
+
+  it('Test persistence update skips PUT when content is empty stub and no client edit', async () => {
+    // Reproduces COR-31 / COR-28: an unedited ydoc whose doc2aem output is the
+    // deterministic empty stub must NOT overwrite real content in da-admin.
+    const EMPTY_STUB = '\n<body>\n  <header></header>\n  <main><div></div></main>\n  <footer></footer>\n</body>\n';
+    const mockDoc2Aem = () => EMPTY_STUB;
+    const pss = await esmock('../src/shareddoc.js', {
+      '@da-tools/da-parser': {
+        doc2aem: mockDoc2Aem,
+      },
+    });
+
+    const mockYDoc = {
+      conns: { keys() { return [{}]; } },
+      name: 'http://foo.bar/0/123.html',
+      hasClientChanged: false,
+    };
+
+    let putCalled = false;
+    pss.persistence.put = async () => {
+      putCalled = true;
+      return { ok: true, status: 200 };
+    };
+
+    const real = '<body><main><div><p>real customer content</p></div></main></body>';
+    const result = await pss.persistence.update(mockYDoc, real, 'test.html');
+    assert.equal(false, putCalled, 'Empty stub PUT must be blocked when no client edit produced it');
+    assert.equal(result, real, 'Returns current unchanged when guard blocks the PUT');
+  });
+
+  it('Test persistence update still PUTs empty content when client edit produced it', async () => {
+    // Defence-in-depth: the guard must not block legitimate empty writes
+    // (e.g. user deletes all content) when hasClientChanged is true.
+    const EMPTY_STUB = '\n<body>\n  <header></header>\n  <main><div></div></main>\n  <footer></footer>\n</body>\n';
+    const mockDoc2Aem = () => EMPTY_STUB;
+    const pss = await esmock('../src/shareddoc.js', {
+      '@da-tools/da-parser': {
+        doc2aem: mockDoc2Aem,
+      },
+    });
+
+    const mockYDoc = {
+      conns: { keys() { return [{}]; } },
+      name: 'http://foo.bar/0/123.html',
+      hasClientChanged: true,
+    };
+
+    const putCalls = [];
+    pss.persistence.put = async (yd, c) => {
+      putCalls.push(c);
+      return { ok: true, status: 200 };
+    };
+
+    const result = await pss.persistence.update(mockYDoc, '<main><div><p>old</p></div></main>', 'test.html');
+    assert.equal(1, putCalls.length, 'PUT must run when client really emptied the doc');
+    assert.equal(putCalls[0], EMPTY_STUB);
+    assert.equal(result, EMPTY_STUB);
+  });
+
+  it('Test messageListener flips hasClientChanged on non-no-op sync update', () => {
+    const ydoc = new WSSharedDoc('test.html');
+    assert.equal(false, ydoc.hasClientChanged, 'Precondition: starts false');
+
+    // Donor doc to encode an authoritative update from
+    const donor = new Y.Doc();
+    donor.getMap('content').set('foo', 'bar');
+    const update = Y.encodeStateAsUpdate(donor);
+
+    const encoder = encoding.createEncoder();
+    encoding.writeVarUint(encoder, 0); // messageSync
+    syncProtocol.writeUpdate(encoder, update);
+    const message = encoding.toUint8Array(encoder);
+
+    const conn = { readyState: 1, send: () => {} };
+    messageListener(conn, ydoc, message);
+
+    assert.equal(true, ydoc.hasClientChanged, 'Non-no-op sync update must flip the flag');
+  });
+
+  it('Test messageListener does NOT flip hasClientChanged on no-op sync (step 1)', () => {
+    const ydoc = new WSSharedDoc('test.html');
+    assert.equal(false, ydoc.hasClientChanged, 'Precondition: starts false');
+
+    // Sync step 1 only writes a reply; it does NOT mutate the receiving doc.
+    const encoder = encoding.createEncoder();
+    encoding.writeVarUint(encoder, 0); // messageSync
+    syncProtocol.writeSyncStep1(encoder, ydoc);
+    const message = encoding.toUint8Array(encoder);
+
+    const conn = { readyState: 1, send: () => {} };
+    messageListener(conn, ydoc, message);
+
+    assert.equal(false, ydoc.hasClientChanged, 'Sync step 1 (no doc mutation) must not flip the flag');
   });
 
   it('Test persistence update closes all and cleans storage on 412', async () => {
@@ -504,7 +726,7 @@ describe('Collab Test Suite', () => {
       return debounced;
     };
     const pss = await esmock('../src/shareddoc.js', {
-      'lodash/debounce.js': {
+      '../src/debounce.js': {
         default: mockdebounce,
       },
     });
@@ -550,6 +772,12 @@ describe('Collab Test Suite', () => {
 
     // Trigger 412 which closes all connections and removes from global map
     await pss.persistence.update(ydoc, '<main><div><p>initial</p></div></main>', 'test.html');
+
+    // Flush pending microtasks: the flushSave path inside closeConn (triggered by the
+    // aem2doc update event above) is async and may still be completing.
+    await new Promise((r) => {
+      setTimeout(r, 0);
+    });
 
     assert(!docs.has(docName), 'Doc should be removed from global map');
 
@@ -662,7 +890,7 @@ describe('Collab Test Suite', () => {
 
     assert.equal(0, called.length, 'Precondition');
     assert(docs.get(mockDoc.name), 'Precondition');
-    closeConn(mockDoc, mockConn);
+    await closeConn(mockDoc, mockConn);
     assert.deepStrictEqual(['close'], called);
     assert.equal(0, mockDoc.conns.size);
     assert.deepStrictEqual(
@@ -694,6 +922,253 @@ describe('Collab Test Suite', () => {
     assert.equal(0, called.length, 'Precondition');
     closeConn(mockDoc, mockConn);
     assert.deepStrictEqual(['close'], called);
+  });
+
+  it('Flush fires on last connection close', async () => {
+    const flushCalled = [];
+    const destroyCalled = [];
+    const mockDoc = {
+      name: 'http://flush.test/doc.html',
+      destroyed: false,
+      awareness: {
+        emit() {},
+        states: new Map(),
+      },
+      conns: new Map(),
+      destroy() {
+        destroyCalled.push('destroy');
+        this.destroyed = true;
+      },
+      flushSave: async () => {
+        flushCalled.push('flush');
+      },
+    };
+
+    const docs = setYDoc(mockDoc.name, mockDoc);
+    const mockConn = { close() {} };
+    mockDoc.conns.set(mockConn, new Set());
+
+    assert.equal(0, flushCalled.length, 'Precondition: flush not yet called');
+    assert(docs.has(mockDoc.name), 'Precondition: doc in global map');
+
+    await closeConn(mockDoc, mockConn);
+
+    assert.deepStrictEqual(['flush'], flushCalled, 'flushSave must be called');
+    assert.deepStrictEqual(['destroy'], destroyCalled, 'destroy must be called after flush');
+    assert(!docs.has(mockDoc.name), 'Doc must be removed from global map');
+  });
+
+  it('Flush is a no-op when nothing is pending', async () => {
+    const unchangedContent = '<main><div><p>unchanged</p></div></main>';
+    const mockdebounce = (f) => {
+      const debounced = async () => f();
+      debounced.cancel = () => {};
+      return debounced;
+    };
+    const pss = await esmock('../src/shareddoc.js', {
+      '../src/debounce.js': { default: mockdebounce },
+      '@da-tools/da-parser': {
+        doc2aem: () => unchangedContent,
+        doc2json: () => '{}',
+        aem2doc,
+        json2doc: () => {},
+      },
+    });
+
+    const docName = 'https://admin.da.live/source/flush-noop.html';
+    const storage = { list: async () => new Map() };
+    const ydoc = new pss.WSSharedDoc(docName);
+    pss.setYDoc(docName, ydoc);
+
+    const putCalls = [];
+    pss.persistence.get = async () => unchangedContent;
+    pss.persistence.put = async () => {
+      putCalls.push('put');
+      return { ok: true, status: 200 };
+    };
+
+    const conn = { auth: undefined, close() {} };
+    await pss.persistence.bindState(docName, ydoc, conn, storage);
+
+    assert(typeof ydoc.flushSave === 'function', 'flushSave should be defined after bindState');
+
+    await ydoc.flushSave();
+
+    assert.equal(0, putCalls.length, 'PUT must not be called when nothing has changed');
+  });
+
+  it('Flush saves unsaved changes when debounce has not fired', async () => {
+    let cancelCalled = false;
+    const mockdebounce = (f) => {
+      const debounced = async () => f();
+      debounced.cancel = () => {
+        cancelCalled = true;
+      };
+      return debounced;
+    };
+    const pss = await esmock('../src/shareddoc.js', {
+      '../src/debounce.js': { default: mockdebounce },
+      '@da-tools/da-parser': {
+        doc2aem: () => '<main><div><p>updated content</p></div></main>',
+        doc2json: () => '{}',
+        aem2doc,
+        json2doc: () => {},
+      },
+    });
+
+    const docName = 'https://admin.da.live/source/flush-saves.html';
+    const storage = { list: async () => new Map() };
+    const ydoc = new pss.WSSharedDoc(docName);
+    pss.setYDoc(docName, ydoc);
+
+    const putCalls = [];
+    pss.persistence.get = async () => '<main><div><p>initial content</p></div></main>';
+    pss.persistence.put = async (doc, content) => {
+      putCalls.push(content);
+      return { ok: true, status: 200 };
+    };
+
+    const conn = { auth: undefined, close() {} };
+    await pss.persistence.bindState(docName, ydoc, conn, storage);
+
+    assert(typeof ydoc.flushSave === 'function', 'flushSave must be set after bindState');
+
+    ydoc.hasClientChanged = true;
+    await ydoc.flushSave();
+
+    assert.equal(1, putCalls.length, 'PUT must be called once with pending changes');
+    assert(putCalls[0].includes('updated content'), 'PUT body must contain the changed content');
+  });
+
+  it('Flush cancels the pending debounce', async () => {
+    let cancelCalled = false;
+    const mockdebounce = (f) => {
+      const debounced = async () => f();
+      debounced.cancel = () => {
+        cancelCalled = true;
+      };
+      return debounced;
+    };
+    const pss = await esmock('../src/shareddoc.js', {
+      '../src/debounce.js': { default: mockdebounce },
+    });
+
+    const docName = 'https://admin.da.live/source/flush-cancel.html';
+    const storage = { list: async () => new Map() };
+    const ydoc = new pss.WSSharedDoc(docName);
+    pss.setYDoc(docName, ydoc);
+
+    pss.persistence.get = async () => '<main><div><p>content</p></div></main>';
+    pss.persistence.put = async () => ({ ok: true, status: 200 });
+
+    const conn = { auth: undefined, close() {} };
+    await pss.persistence.bindState(docName, ydoc, conn, storage);
+
+    assert(!cancelCalled, 'Precondition: cancel not yet called');
+
+    await ydoc.flushSave();
+
+    assert(cancelCalled, 'debouncedSave.cancel() must be called during flush');
+  });
+
+  it('Flush waits for an in-flight save before resolving', async () => {
+    let resolvePut;
+    let putStarted = false;
+
+    const mockdebounce = (f) => {
+      const debounced = async () => f();
+      debounced.cancel = () => {};
+      return debounced;
+    };
+    const pss = await esmock('../src/shareddoc.js', {
+      '../src/debounce.js': { default: mockdebounce },
+      '@da-tools/da-parser': {
+        doc2aem: () => '<main><div><p>content</p></div></main>',
+        doc2json: () => '{}',
+        aem2doc,
+        json2doc: () => {},
+      },
+    });
+
+    const docName = 'https://admin.da.live/source/flush-inflight.html';
+    const storage = { list: async () => new Map() };
+    const ydoc = new pss.WSSharedDoc(docName);
+    pss.setYDoc(docName, ydoc);
+
+    pss.persistence.get = async () => '<main><div><p>initial</p></div></main>';
+    pss.persistence.put = async () => {
+      putStarted = true;
+      // Stall until released by the test
+      await new Promise((res) => {
+        resolvePut = res;
+      });
+      return { ok: true, status: 200 };
+    };
+
+    const conn = { auth: undefined, close() {} };
+    await pss.persistence.bindState(docName, ydoc, conn, storage);
+
+    ydoc.hasClientChanged = true;
+    // Kick off the first save (in-flight, stalls inside PUT)
+    let firstFlushDone = false;
+    const firstSave = ydoc.flushSave().then(() => {
+      firstFlushDone = true;
+    });
+
+    // Yield so the first save enters the in-flight state
+    await new Promise((r) => {
+      setTimeout(r, 0);
+    });
+    assert(putStarted, 'Precondition: first PUT must have started');
+    assert(!firstFlushDone, 'First flush must not be done while PUT is stalled');
+
+    // Second flush while first is in-flight — must wait
+    let secondFlushDone = false;
+    const secondSave = ydoc.flushSave().then(() => {
+      secondFlushDone = true;
+    });
+
+    // Yield once more — second flush is waiting on savingPromise
+    await new Promise((r) => {
+      setTimeout(r, 0);
+    });
+    assert(!secondFlushDone, 'Second flush must not resolve while first PUT is still in-flight');
+
+    // Release the stalled PUT
+    resolvePut();
+    await firstSave;
+    await secondSave;
+
+    assert(firstFlushDone, 'First flush must be done after PUT resolves');
+    assert(secondFlushDone, 'Second flush must also be done after PUT resolves');
+  });
+
+  it('Non-last connection close does not flush', async () => {
+    const flushCalled = [];
+    const mockDoc = {
+      name: 'http://flush.test/multi-conn.html',
+      awareness: {
+        emit() {},
+        states: new Map(),
+      },
+      conns: new Map(),
+      destroy() {},
+      flushSave: async () => { flushCalled.push('flush'); },
+    };
+
+    const docs = setYDoc(mockDoc.name, mockDoc);
+    const conn1 = { close() {} };
+    const conn2 = { close() {} };
+    mockDoc.conns.set(conn1, new Set());
+    mockDoc.conns.set(conn2, new Set());
+
+    assert.equal(2, mockDoc.conns.size, 'Precondition: two connections');
+
+    await closeConn(mockDoc, conn1);
+
+    assert.equal(0, flushCalled.length, 'flushSave must NOT be called when connections remain');
+    assert.equal(1, mockDoc.conns.size, 'One connection must remain');
+    assert(docs.has(mockDoc.name), 'Doc must still be in global map');
   });
 
   it('Test bindState read from da-admin for doc', async () => {
@@ -768,6 +1243,118 @@ describe('Collab Test Suite', () => {
     assert.equal(2, json2DocCalled.length);
     assert.equal('Get: http://lalala.com/ha/ha/ha.json-myauth-daadmin', json2DocCalled[0]);
     assert.equal(testYDoc, json2DocCalled[1]);
+  });
+
+  it('Test bindState skips da-admin reload when client sends Y.js update before timeout', async () => {
+    const aem2DocCalled = [];
+    const mockAem2Doc = (sc, yd) => aem2DocCalled.push(sc, yd);
+    const pss = await esmock('../src/shareddoc.js', {
+      '@da-tools/da-parser': {
+        aem2doc: mockAem2Doc,
+      },
+    });
+
+    const docName = 'http://lalala.com/ha/ha/ha.html';
+    const testYDoc = new Y.Doc();
+    testYDoc.daadmin = 'daadmin';
+    const mockConn = {
+      auth: 'myauth',
+      authActions: ['read'],
+    };
+    pss.setYDoc(docName, testYDoc);
+
+    const mockStorage = { list: () => new Map() };
+    pss.persistence.get = async (nm, au, ad) => `Get: ${nm}-${au}-${ad}`;
+    pss.persistence.update = async () => {};
+
+    await pss.persistence.bindState(docName, testYDoc, mockConn, mockStorage);
+
+    assert.equal(0, aem2DocCalled.length, 'Precondition');
+
+    // Simulate a client Y.js update arriving before the 1-second timeout fires.
+    // This represents the client pushing its authoritative state (e.g. an image
+    // whose FPO was just replaced) to a freshly reconnected DO whose storage was cleared.
+    testYDoc.transact(() => {
+      testYDoc.getMap('clientstate').set('img', 'real-url.png');
+    });
+
+    await wait(1500);
+
+    assert.equal(0, aem2DocCalled.length, 'da-admin reload should be skipped when the client sent state first');
+  });
+
+  it('Test bindState still reloads from da-admin when no client update arrives before timeout', async () => {
+    const aem2DocCalled = [];
+    const mockAem2Doc = (sc, yd) => aem2DocCalled.push(sc, yd);
+    const pss = await esmock('../src/shareddoc.js', {
+      '@da-tools/da-parser': {
+        aem2doc: mockAem2Doc,
+      },
+    });
+
+    const docName = 'http://lalala.com/ha/ha/ha2.html';
+    const testYDoc = new Y.Doc();
+    testYDoc.daadmin = 'daadmin';
+    const mockConn = {
+      auth: 'myauth',
+      authActions: ['read'],
+    };
+    pss.setYDoc(docName, testYDoc);
+
+    const mockStorage = { list: () => new Map() };
+    pss.persistence.get = async (nm, au, ad) => `Get: ${nm}-${au}-${ad}`;
+    pss.persistence.update = async () => {};
+
+    await pss.persistence.bindState(docName, testYDoc, mockConn, mockStorage);
+
+    assert.equal(0, aem2DocCalled.length, 'Precondition — reload is deferred');
+
+    // No client update fired; the timeout must proceed and restore from da-admin.
+    await wait(1500);
+
+    assert.equal(2, aem2DocCalled.length, 'da-admin reload must still run when no client state arrived');
+    assert.equal('Get: http://lalala.com/ha/ha/ha2.html-myauth-daadmin', aem2DocCalled[0]);
+    assert.equal(testYDoc, aem2DocCalled[1]);
+  });
+
+  it('Test bindState includes docName when aem2doc throws while restoring from da-admin', async () => {
+    const throwing = () => {
+      throw new TypeError("Cannot read properties of undefined (reading 'toLowerCase')");
+    };
+    const pss = await esmock('../src/shareddoc.js', {
+      '@da-tools/da-parser': {
+        aem2doc: throwing,
+      },
+    });
+
+    const docName = 'http://lalala.com/ha/ha/failing.html';
+    const testYDoc = new Y.Doc();
+    testYDoc.daadmin = 'daadmin';
+    const mockConn = {
+      auth: 'myauth',
+      authActions: ['read'],
+    };
+    pss.setYDoc(docName, testYDoc);
+
+    const mockStorage = { list: () => new Map() };
+    pss.persistence.get = async (nm, au, ad) => `Get: ${nm}-${au}-${ad}`;
+    pss.persistence.update = async () => {};
+
+    const logged = [];
+    const savedError = console.error;
+    console.error = (...args) => logged.push(args);
+    try {
+      await pss.persistence.bindState(docName, testYDoc, mockConn, mockStorage);
+      // Wait for the 1s deferred reload + a buffer.
+      await wait(1500);
+    } finally {
+      console.error = savedError;
+    }
+
+    const daAdminLogs = logged.filter((args) => args[0] === '[docroom] Problem restoring state from da-admin');
+    assert.equal(1, daAdminLogs.length, 'da-admin restore failure should be logged exactly once');
+    assert.equal(docName, daAdminLogs[0][1], 'docName must appear in the da-admin restore failure log (Coralogix uses it to identify the failing doc)');
+    assert(daAdminLogs[0][2] instanceof TypeError, 'the underlying error must still be logged for stack capture');
   });
 
   it('Test bindstate read from worker storage for doc', async () => {
@@ -878,7 +1465,7 @@ describe('Collab Test Suite', () => {
   it('test persistence update on storage update', async () => {
     const mockdebounce = (f) => async () => f();
     const pss = await esmock('../src/shareddoc.js', {
-      'lodash/debounce.js': {
+      '../src/debounce.js': {
         default: mockdebounce,
       },
     });
@@ -934,6 +1521,70 @@ describe('Collab Test Suite', () => {
     }
   });
 
+  it('Test concurrent save calls are guarded by saving flag', async () => {
+    // Scenario: debounced handler fires while a previous PUT is still in flight.
+    // Without the saving flag, both calls race to PUT concurrently.
+    const mockdebounce = (f) => async () => f();
+    const pss = await esmock('../src/shareddoc.js', {
+      '../src/debounce.js': {
+        default: mockdebounce,
+      },
+    });
+
+    const docName = 'https://admin.da.live/source/foo/bar.html';
+    const storage = { list: async () => new Map() };
+    const updObservers = [];
+    const ydoc = new Y.Doc();
+    ydoc.on = (ev, fun) => {
+      if (ev === 'update') {
+        updObservers.push(fun);
+      }
+    };
+    pss.setYDoc(docName, ydoc);
+
+    const savedSetTimeout = globalThis.setTimeout;
+    const savedGet = pss.persistence.get;
+    const savedPut = pss.persistence.put;
+    try {
+      globalThis.setTimeout = (f) => {
+        globalThis.setTimeout = savedSetTimeout;
+        f();
+      };
+
+      pss.persistence.get = async () => '<main><div>initial</div></main>';
+
+      let concurrentPuts = 0;
+      let maxConcurrentPuts = 0;
+      pss.persistence.put = async () => {
+        concurrentPuts += 1;
+        maxConcurrentPuts = Math.max(maxConcurrentPuts, concurrentPuts);
+        await new Promise((resolve) => {
+          savedSetTimeout(resolve, 30);
+        });
+        concurrentPuts -= 1;
+        return { ok: true, status: 200 };
+      };
+
+      await pss.persistence.bindState(docName, ydoc, {}, storage);
+
+      aem2doc('<main><div>content1</div></main>', ydoc);
+
+      assert.equal(2, updObservers.length, 'Two update observers must be registered');
+
+      // Fire the debounced da-admin handler twice concurrently — simulates rapid
+      // updates while a prior save is still in flight.
+      const p1 = updObservers[1]();
+      const p2 = updObservers[1]();
+      await Promise.all([p1, p2]);
+
+      assert.equal(1, maxConcurrentPuts, 'At most one PUT must be in-flight at a time');
+    } finally {
+      globalThis.setTimeout = savedSetTimeout;
+      pss.persistence.get = savedGet;
+      pss.persistence.put = savedPut;
+    }
+  });
+
   it('test persist state in worker storage on update', async () => {
     const docName = 'https://admin.da.live/source/foo/bar.html';
 
@@ -950,7 +1601,7 @@ describe('Collab Test Suite', () => {
     const conn = {};
     const called = [];
     const storage = {
-      deleteAll: async () => called.push('deleteAll'),
+      get: async () => undefined,
       list: async () => new Map(),
       put: async (obj) => called.push(obj),
     };
@@ -975,12 +1626,12 @@ describe('Collab Test Suite', () => {
       await updObservers[0]();
       await updObservers[1]();
 
-      // check that it was stored
-      assert.equal(2, called.length);
-      assert.equal('deleteAll', called[0]);
+      // check that it was stored (filter out lastsync put calls)
+      const statePuts = called.filter((c) => c?.docstore);
+      assert.equal(1, statePuts.length);
 
       const ydoc2 = new Y.Doc();
-      Y.applyUpdate(ydoc2, called[1].docstore);
+      Y.applyUpdate(ydoc2, statePuts[0].docstore);
 
       assert.equal('bcd', ydoc2.getMap('yah').get('a'));
       assert(doc2aem(ydoc2).includes('myinitial'));
@@ -1354,6 +2005,86 @@ describe('Collab Test Suite', () => {
     }
   });
 
+  it('messageFlushRequest sends flush response ack with ok=1 after flushSave', async () => {
+    const flushed = [];
+    const sent = [];
+
+    const doc = new Y.Doc();
+    doc.conns = new Map();
+    doc.awareness = { getStates: () => new Map(), on: () => {}, off: () => {} };
+    doc.flushSave = async () => {
+      flushed.push('flush');
+    };
+
+    const conn = {
+      readyState: 1,
+      send(data) { sent.push(data); },
+    };
+    doc.conns.set(conn, new Set());
+
+    const message = new Uint8Array([messageFlushRequest]);
+    await messageListener(conn, doc, message);
+
+    assert.deepStrictEqual(['flush'], flushed, 'flushSave must be called');
+    assert.equal(1, sent.length, 'exactly one ack message must be sent');
+
+    // Decode the ack: first varint = messageFlushResponse, second varint = 1 (ok)
+    const decoder = decoding.createDecoder(sent[0]);
+    assert.equal(messageFlushResponse, decoding.readVarUint(decoder), 'ack type must be messageFlushResponse');
+    assert.equal(1, decoding.readVarUint(decoder), 'ok flag must be 1');
+  });
+
+  it('messageFlushRequest sends flush response with ok=0 when flushSave throws', async () => {
+    const sent = [];
+
+    const doc = new Y.Doc();
+    doc.conns = new Map();
+    doc.awareness = { getStates: () => new Map(), on: () => {}, off: () => {} };
+    doc.flushSave = async () => {
+      throw new Error('save failed');
+    };
+
+    const conn = {
+      readyState: 1,
+      send(data) { sent.push(data); },
+    };
+    doc.conns.set(conn, new Set());
+
+    const message = new Uint8Array([messageFlushRequest]);
+    await messageListener(conn, doc, message);
+
+    assert.equal(1, sent.length, 'exactly one ack message must be sent');
+
+    const decoder = decoding.createDecoder(sent[0]);
+    assert.equal(messageFlushResponse, decoding.readVarUint(decoder), 'ack type must be messageFlushResponse');
+    assert.equal(0, decoding.readVarUint(decoder), 'ok flag must be 0 on error');
+    assert.equal('save failed', decoding.readVarString(decoder), 'error message must be included');
+  });
+
+  it('messageFlushRequest works when doc has no flushSave (still sends ok ack)', async () => {
+    const sent = [];
+
+    const doc = new Y.Doc();
+    doc.conns = new Map();
+    doc.awareness = { getStates: () => new Map(), on: () => {}, off: () => {} };
+    // no flushSave defined
+
+    const conn = {
+      readyState: 1,
+      send(data) { sent.push(data); },
+    };
+    doc.conns.set(conn, new Set());
+
+    const message = new Uint8Array([messageFlushRequest]);
+    await messageListener(conn, doc, message);
+
+    assert.equal(1, sent.length);
+
+    const decoder = decoding.createDecoder(sent[0]);
+    assert.equal(messageFlushResponse, decoding.readVarUint(decoder));
+    assert.equal(1, decoding.readVarUint(decoder), 'ok must be 1 when no flushSave (nothing to flush)');
+  });
+
   it('readState not chunked', async () => {
     const docName = 'http://foo.bar/doc123.html';
     const stored = new Map();
@@ -1402,38 +2133,119 @@ describe('Collab Test Suite', () => {
     const docName = 'https://some.where/far/away.html';
     const state = new Uint8Array([1, 2, 3, 4, 5]);
 
-    const called = [];
+    const putCalled = [];
+    const deleteCalled = [];
     const storage = {
-      deleteAll: async () => called.push('deleteAll'),
-      put: (obj) => called.push(obj),
+      get: async () => undefined,
+      put: (obj) => putCalled.push(obj),
+      delete: async (key) => deleteCalled.push(key),
     };
 
     await storeState(docName, state, storage, 10);
 
-    assert.equal(2, called.length);
-    assert.equal('deleteAll', called[0]);
-    assert.deepStrictEqual(state, called[1].docstore);
-    assert.equal(docName, called[1].doc);
+    assert.equal(1, putCalled.length);
+    assert.deepStrictEqual(state, putCalled[0].docstore);
+    assert.equal(docName, putCalled[0].doc);
+    assert.equal(0, deleteCalled.length, 'non-chunked store should not call delete when no old chunks exist');
   });
 
   it('storeState chunked', async () => {
     const state = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9]);
 
-    const called = [];
+    const putCalled = [];
+    const deleteCalled = [];
     const storage = {
-      deleteAll: async () => called.push('deleteAll'),
-      put: (obj) => called.push(obj),
+      get: async () => undefined,
+      put: (obj) => putCalled.push(obj),
+      delete: async (key) => deleteCalled.push(key),
     };
 
     await storeState('somedoc', state, storage, 4);
 
-    assert.equal(2, called.length);
-    assert.equal('deleteAll', called[0]);
-    assert.equal(3, called[1].chunks);
-    assert.equal('somedoc', called[1].doc);
-    assert.deepStrictEqual(new Uint8Array([1, 2, 3, 4]), called[1].chunk_0);
-    assert.deepStrictEqual(new Uint8Array([5, 6, 7, 8]), called[1].chunk_1);
-    assert.deepStrictEqual(new Uint8Array([9]), called[1].chunk_2);
+    assert.equal(1, putCalled.length);
+    assert.equal(3, putCalled[0].chunks);
+    assert.equal('somedoc', putCalled[0].doc);
+    assert.deepStrictEqual(new Uint8Array([1, 2, 3, 4]), putCalled[0].chunk_0);
+    assert.deepStrictEqual(new Uint8Array([5, 6, 7, 8]), putCalled[0].chunk_1);
+    assert.deepStrictEqual(new Uint8Array([9]), putCalled[0].chunk_2);
+    assert.deepStrictEqual(['docstore'], deleteCalled, 'chunked store must delete old docstore key');
+  });
+
+  it('storeState large-to-small cleans up old chunk keys', async () => {
+    const docName = 'https://some.where/far/away.html';
+    const state = new Uint8Array([1, 2, 3]); // small, fits in single docstore
+
+    const putCalled = [];
+    const deleteCalled = [];
+    const storage = {
+      get: async (key) => (key === 'chunks' ? 3 : undefined),
+      put: (obj) => putCalled.push(obj),
+      delete: async (key) => deleteCalled.push(key),
+    };
+
+    await storeState(docName, state, storage, 10);
+
+    assert.equal(1, putCalled.length);
+    assert.deepStrictEqual(state, putCalled[0].docstore);
+    assert.equal(1, deleteCalled.length, 'should call delete once for stale chunk keys');
+    assert.deepStrictEqual(
+      ['chunks', 'chunk_0', 'chunk_1', 'chunk_2'],
+      deleteCalled[0],
+      'should delete chunks count key and all chunk data keys',
+    );
+  });
+
+  it('storeState large-to-smaller-large cleans up extra chunk keys', async () => {
+    // 20 bytes: with chunkSize=6 → 4 chunks, with chunkSize=4 → 5 chunks
+    const state = new Uint8Array(Array.from({ length: 20 }, (_, i) => i + 1));
+
+    const putCalled = [];
+    const deleteCalled = [];
+    const storage = {
+      get: async (key) => (key === 'chunks' ? 5 : undefined), // previously had 5 chunks
+      put: (obj) => putCalled.push(obj),
+      delete: async (key) => deleteCalled.push(key),
+    };
+
+    await storeState('somedoc', state, storage, 4); // chunkSize=4 → 5 chunks for 20 bytes
+
+    // state.length=20, chunkSize=4 → exactly 5 chunks (same as before, no extras to delete)
+    // Use chunkSize=6 to get 4 chunks (ceil(20/6)=4), so old chunk_4 must be deleted
+    const putCalled2 = [];
+    const deleteCalled2 = [];
+    const storage2 = {
+      get: async (key) => (key === 'chunks' ? 5 : undefined),
+      put: (obj) => putCalled2.push(obj),
+      delete: async (key) => deleteCalled2.push(key),
+    };
+
+    await storeState('somedoc', state, storage2, 6); // chunkSize=6 → 4 chunks (chunk_0..chunk_3)
+
+    assert.equal(1, putCalled2.length);
+    assert.equal(4, putCalled2[0].chunks);
+    // delete should be called for docstore (no docstore) and for extra chunk_4
+    const allDeleted = deleteCalled2.flat ? deleteCalled2.flat() : [].concat(...deleteCalled2);
+    assert.ok(allDeleted.includes('chunk_4'), 'must delete stale chunk_4 when doc shrank from 5 to 4 chunks');
+  });
+
+  it('storeState error is caught and logged when storage fails', async () => {
+    const docName = 'https://some.where/fail.html';
+    const state = new Uint8Array([1, 2, 3]);
+    const storageError = new Error('cannot access storage because object has moved to a different machine');
+    const storage = {
+      get: async () => undefined,
+      put: async () => { throw storageError; },
+      delete: async () => {},
+    };
+
+    const logged = [];
+    const savedError = console.error;
+    console.error = (...args) => logged.push(args);
+    try {
+      await assert.rejects(() => storeState(docName, state, storage), storageError);
+    } finally {
+      console.error = savedError;
+    }
   });
 
   it('Test showError', () => {
@@ -1476,7 +2288,7 @@ describe('Collab Test Suite', () => {
     const conn = {};
     const called = [];
     const storage = {
-      deleteAll: async () => called.push('deleteAll'),
+      get: async () => undefined,
       list: async () => new Map(),
       put: async (obj) => called.push(obj),
     };
@@ -1517,12 +2329,12 @@ describe('Collab Test Suite', () => {
       await updObservers[0]();
       await updObservers[1]();
 
-      // check that it was stored
-      assert.equal(2, called.length);
-      assert.equal('deleteAll', called[0]);
+      // check that it was stored (filter out lastsync put calls)
+      const statePuts = called.filter((c) => c?.docstore);
+      assert.equal(1, statePuts.length);
 
       const ydoc2 = new Y.Doc();
-      Y.applyUpdate(ydoc2, called[1].docstore);
+      Y.applyUpdate(ydoc2, statePuts[0].docstore);
 
       assert.equal('bcd', ydoc2.getMap('yah').get('a'));
       const doc2aemStr2 = doc2aem(ydoc2).replace(/\n\s*/g, '');
@@ -1531,6 +2343,505 @@ describe('Collab Test Suite', () => {
     } finally {
       globalThis.setTimeout = savedSetTimeout;
       persistence.get = savedGet;
+    }
+  });
+
+  it('Test bindstate restores from CF storage when ahead of da-admin (pending unsaved changes)', async () => {
+    const docName = 'https://admin.da.live/source/foo/bar.html';
+
+    const daAdminContent = '<body>\n  <header></header>\n  <main><div><p>original</p></div></main>\n  <footer></footer>\n</body>\n';
+
+    // Build a Yjs doc with pending changes (text changed from 'original' to 'pending edit')
+    const pendingDoc = new Y.Doc();
+    aem2doc(daAdminContent, pendingDoc);
+    // Mutate it to create pending content
+    const rootType = pendingDoc.getXmlFragment('prosemirror');
+    const pendingState = Y.encodeStateAsUpdate(pendingDoc);
+    const pendingContent = doc2aem(pendingDoc);
+    assert.notEqual(daAdminContent, pendingContent, 'Precondition: CF state differs from da-admin');
+
+    // Prepare the stored state: CF storage has the pendingDoc, lastsync = daAdminContent
+    const stored = new Map();
+    stored.set('docstore', pendingState);
+    stored.set('doc', docName);
+
+    const ydoc = new Y.Doc();
+    setYDoc(docName, ydoc);
+    const conn = {};
+    const storage = {
+      list: async () => stored,
+      get: async (key) => (key === 'lastsync' ? daAdminContent : undefined),
+    };
+
+    const savedSetTimeout = globalThis.setTimeout;
+    const savedGet = persistence.get;
+    try {
+      // Suppress the da-admin fallback timeout — not needed in this test
+      globalThis.setTimeout = () => {};
+      persistence.get = async () => daAdminContent;
+
+      await persistence.bindState(docName, ydoc, conn, storage);
+
+      // CF storage should have been used (lastsync === da-admin content)
+      // so the pending mutations are preserved
+      const result = doc2aem(ydoc);
+      assert.equal(result, pendingContent, 'Should restore from CF storage preserving pending changes');
+    } finally {
+      globalThis.setTimeout = savedSetTimeout;
+      persistence.get = savedGet;
+    }
+  });
+
+  it('bindState writes lastsync after initial da-admin restore so a later DO reset can recover pending changes', async () => {
+    const docName = 'https://admin.da.live/source/foo/bar.html';
+    const daAdminContent = '<body>\n  <header></header>\n  <main><div><p>synced</p></div></main>\n  <footer></footer>\n</body>\n';
+
+    const ydoc = new Y.Doc();
+    setYDoc(docName, ydoc);
+    const conn = {};
+
+    const putCalls = [];
+    const storage = {
+      list: async () => new Map(), // empty — triggers da-admin fallback path
+      get: async () => undefined,
+      put: async (...args) => putCalls.push(args),
+    };
+
+    const savedSetTimeout = globalThis.setTimeout;
+    const savedGet = persistence.get;
+    try {
+      let timeoutFn;
+      globalThis.setTimeout = (f) => {
+        timeoutFn = f;
+      };
+      persistence.get = async () => daAdminContent;
+
+      await persistence.bindState(docName, ydoc, conn, storage);
+      assert(timeoutFn, 'setTimeout callback should have been registered');
+
+      await timeoutFn();
+
+      // storage.put('lastsync', daAdminContent) must have been called
+      const lastsyncPuts = putCalls.filter(([key]) => key === 'lastsync');
+      assert.equal(1, lastsyncPuts.length, 'lastsync should be written exactly once');
+      assert.equal(daAdminContent, lastsyncPuts[0][1], 'lastsync value must equal the da-admin content');
+    } finally {
+      globalThis.setTimeout = savedSetTimeout;
+      persistence.get = savedGet;
+    }
+  });
+
+  it('isExpectedPlatformEvent returns true for Cloudflare deployment event', () => {
+    const err = new Error('This script has been upgraded');
+    assert.equal(true, isExpectedPlatformEvent(err));
+  });
+
+  it('isExpectedPlatformEvent returns true for DO live migration event', () => {
+    const err = new Error('cannot access storage because object has moved to a different machine');
+    assert.equal(true, isExpectedPlatformEvent(err));
+  });
+
+  it('isExpectedPlatformEvent returns false for regular errors', () => {
+    assert.equal(false, isExpectedPlatformEvent(new Error('some unexpected error')));
+    assert.equal(false, isExpectedPlatformEvent(new Error()));
+    assert.equal(false, isExpectedPlatformEvent(null));
+    assert.equal(false, isExpectedPlatformEvent(undefined));
+  });
+
+  it('setupWSConnection sets connectedAt on conn', async () => {
+    const savedBind = persistence.bindState;
+    try {
+      persistence.bindState = async () => new Map();
+
+      const docName = 'https://somewhere.com/connectedat.html';
+      const mockConn = {
+        addEventListener() {},
+        close() {},
+        readyState: 1,
+        send() {},
+      };
+
+      const before = Date.now();
+      await setupWSConnection(mockConn, docName, {}, {});
+      const after = Date.now();
+
+      assert(typeof mockConn.connectedAt === 'number', 'connectedAt should be a number');
+      assert(mockConn.connectedAt >= before, 'connectedAt should be >= before timestamp');
+      assert(mockConn.connectedAt <= after, 'connectedAt should be <= after timestamp');
+    } finally {
+      persistence.bindState = savedBind;
+    }
+  });
+
+  it('closeConn logs duration and unsaved: false when hasClientChanged is false', () => {
+    const logged = [];
+    const savedLog = console.log;
+    console.log = (...args) => logged.push(args);
+
+    try {
+      const docName = 'http://foo.bar/logtest.html';
+      const mockDoc = {
+        hasClientChanged: false,
+        name: docName,
+        conns: new Map(),
+        awareness: { states: new Map() },
+        destroy() {},
+      };
+
+      const mockConn = {
+        connectedAt: Date.now() - 1500,
+        close() {},
+      };
+      mockDoc.conns.set(mockConn, new Set());
+      setYDoc(docName, mockDoc);
+
+      closeConn(mockDoc, mockConn);
+
+      const lastCloseLog = logged.find((args) => args[0] === '[docroom] Last connection closed');
+      assert(lastCloseLog, 'Should have logged last connection closed');
+      assert.equal(lastCloseLog[1], docName);
+      assert.match(lastCloseLog[2], /^duration: \d+ms$/);
+      assert.equal(lastCloseLog[3], 'unsaved: false');
+    } finally {
+      console.log = savedLog;
+    }
+  });
+
+  it('closeConn logs unsaved: true when hasClientChanged is true', () => {
+    const logged = [];
+    const savedLog = console.log;
+    console.log = (...args) => logged.push(args);
+
+    try {
+      const docName = 'http://foo.bar/logtest-dirty.html';
+      const mockDoc = {
+        hasClientChanged: true,
+        name: docName,
+        conns: new Map(),
+        awareness: { states: new Map() },
+        destroy() {},
+      };
+
+      const mockConn = {
+        connectedAt: Date.now() - 500,
+        close() {},
+      };
+      mockDoc.conns.set(mockConn, new Set());
+      setYDoc(docName, mockDoc);
+
+      closeConn(mockDoc, mockConn);
+
+      const lastCloseLog = logged.find((args) => args[0] === '[docroom] Last connection closed');
+      assert(lastCloseLog, 'Should have logged last connection closed');
+      assert.equal(lastCloseLog[1], docName);
+      assert.equal(lastCloseLog[3], 'unsaved: true');
+    } finally {
+      console.log = savedLog;
+    }
+  });
+
+  it('persistence.update logs save success when content changed', async () => {
+    const mockDoc2Aem = () => 'new content';
+    const pss = await esmock('../src/shareddoc.js', {
+      '@da-tools/da-parser': {
+        doc2aem: mockDoc2Aem,
+      },
+    });
+
+    const mockYDoc = {
+      conns: { keys() { return [{}]; } },
+      name: 'http://foo.bar/0/save-log.html',
+      hasClientChanged: true,
+    };
+
+    pss.persistence.put = async () => ({ ok: true, status: 200, statusText: 'OK' });
+
+    const logged = [];
+    const savedLog = console.log;
+    console.log = (...args) => logged.push(args);
+
+    try {
+      const result = await pss.persistence.update(mockYDoc, 'old content', 'save-log.html');
+      assert.equal(result, 'new content');
+
+      const saveLog = logged.find((args) => args[0] === '[docroom] Saved to da-admin');
+      assert(saveLog, 'Should have logged save success');
+      assert.equal(saveLog[1], 'save-log.html');
+      assert.equal(saveLog[2], `${'new content'.length}b`);
+    } finally {
+      console.log = savedLog;
+    }
+  });
+
+  it('debounced save skips concurrent saves (only one PUT in-flight)', async () => {
+    const mockdebounce = (f) => {
+      const debounced = async () => f();
+      debounced.cancel = () => {};
+      return debounced;
+    };
+    const pss = await esmock('../src/shareddoc.js', {
+      '../src/debounce.js': {
+        default: mockdebounce,
+      },
+    });
+
+    const docName = 'https://admin.da.live/source/skip-save.html';
+    const storage = { list: async () => new Map() };
+    const updObservers = [];
+    const ydoc = new pss.WSSharedDoc(docName);
+    const originalOn = ydoc.on.bind(ydoc);
+    ydoc.on = (ev, handler) => {
+      if (ev === 'update') {
+        updObservers.push(handler);
+      }
+      return originalOn(ev, handler);
+    };
+    pss.setYDoc(docName, ydoc);
+
+    const savedSetTimeout = globalThis.setTimeout;
+    try {
+      globalThis.setTimeout = (f) => {
+        globalThis.setTimeout = savedSetTimeout;
+        f();
+      };
+
+      pss.persistence.get = async () => '<main><div>initial</div></main>';
+
+      let putCallCount = 0;
+      pss.persistence.put = async () => {
+        putCallCount += 1;
+        await new Promise((resolve) => {
+          savedSetTimeout(resolve, 50);
+        });
+        return { ok: true, status: 200, statusText: 'OK' };
+      };
+
+      await pss.persistence.bindState(docName, ydoc, {}, storage);
+      assert.equal(updObservers.length, 2, 'Precondition: two update observers registered');
+
+      const p1 = updObservers[1]();
+      const p2 = updObservers[1]();
+      await Promise.all([p1, p2]);
+
+      assert.equal(putCallCount, 1, 'Only one PUT should have been made');
+    } finally {
+      globalThis.setTimeout = savedSetTimeout;
+    }
+  });
+
+  // ---------------------------------------------------------------------------
+  // Backend resolution (api-live-switch branch)
+  //
+  // The storage backend is determined entirely by the doc URL: docs under
+  // https://api.ent-aem.live live in Helix (global fetch); everything else goes
+  // through the da-admin service binding. There is no isHelix flag to thread.
+  // ---------------------------------------------------------------------------
+
+  it('getBackend routes da-admin docs through the daadmin binding', async () => {
+    const calls = [];
+    const daadmin = {
+      fetch: async (url, opts) => {
+        calls.push({ url, opts });
+        return 'da-resp';
+      },
+    };
+    const backend = getBackend('https://admin.da.live/x.html', daadmin);
+    const resp = await backend.fetch('https://admin.da.live/x.html', { method: 'HEAD' });
+
+    assert.equal('da-resp', resp);
+    assert.equal(1, calls.length);
+    assert.equal('https://admin.da.live/x.html', calls[0].url);
+  });
+
+  it('getBackend routes api.ent-aem.live docs through the global fetch', async () => {
+    const savedFetch = globalThis.fetch;
+    const calls = [];
+    globalThis.fetch = async (url, opts) => {
+      calls.push({ url, opts });
+      return 'helix-resp';
+    };
+    try {
+      const daadmin = {
+        fetch: async () => { assert.fail('daadmin.fetch must not be called for Helix docs'); },
+      };
+      const backend = getBackend('https://api.ent-aem.live/o/r/p.html', daadmin);
+      const resp = await backend.fetch('https://api.ent-aem.live/o/r/p.html', { method: 'HEAD' });
+
+      assert.equal('helix-resp', resp);
+      assert.equal(1, calls.length);
+      assert.equal('https://api.ent-aem.live/o/r/p.html', calls[0].url);
+    } finally {
+      globalThis.fetch = savedFetch;
+    }
+  });
+
+  it('getBackend.putReqData builds multipart form-data for da-admin docs', () => {
+    const backend = getBackend('https://admin.da.live/x.html', {});
+    const { body, size, headers } = backend.putReqData('hello world', 'text/html');
+
+    assert(body instanceof FormData, 'da-admin PUT body must be FormData');
+    assert.equal(size, new Blob(['hello world']).size);
+    assert.deepStrictEqual(headers, {}, 'da-admin path must not set Content-Type (FormData boundary handles it)');
+  });
+
+  it('getBackend.putReqData sends raw body + Content-Type for Helix docs', () => {
+    const backend = getBackend('https://api.ent-aem.live/o/r/p.html', {});
+    const { body, size, headers } = backend.putReqData('hello world', 'text/html');
+
+    assert.strictEqual(body, 'hello world', 'Helix PUT body must be the raw content string');
+    assert.equal(size, 'hello world'.length);
+    assert.deepStrictEqual(headers, { 'Content-Type': 'text/html' });
+  });
+
+  it('isHelixDoc is true only for api.ent-aem.live doc URLs', () => {
+    assert.equal(isHelixDoc('https://api.ent-aem.live/o/r/p.html'), true);
+    assert.equal(isHelixDoc('https://admin.da.live/x.html'), false);
+    assert.equal(isHelixDoc('http://localhost:8080/x.html'), false);
+  });
+
+  it('persistence.get routes to the global fetch for an api.ent-aem.live doc', async () => {
+    const savedFetch = globalThis.fetch;
+    const calls = [];
+    globalThis.fetch = async (url, opts) => {
+      calls.push({ url, opts });
+      return {
+        ok: true, text: async () => 'helix content', status: 200, statusText: 'OK',
+      };
+    };
+    try {
+      const daadmin = {
+        fetch: async () => { assert.fail('daadmin.fetch must not be called for Helix docs'); },
+      };
+      const result = await persistence.get(
+        'https://api.ent-aem.live/owner/repo/page.html',
+        'Bearer t',
+        daadmin,
+      );
+      assert.equal(result, 'helix content');
+      assert.equal(1, calls.length);
+      assert.equal(calls[0].url, 'https://api.ent-aem.live/owner/repo/page.html');
+      assert.equal(calls[0].opts.headers.get('Authorization'), 'Bearer t');
+    } finally {
+      globalThis.fetch = savedFetch;
+    }
+  });
+
+  it('persistence.put for a Helix doc sends raw body and Content-Type header', async () => {
+    const savedFetch = globalThis.fetch;
+    const calls = [];
+    globalThis.fetch = async (url, opts) => {
+      calls.push({ url, opts });
+      return { ok: true, status: 200, statusText: 'OK' };
+    };
+    try {
+      const conns = new Map();
+      conns.set({ auth: 'Bearer abc' }, new Set());
+      const ydoc = {
+        name: 'https://api.ent-aem.live/owner/repo/page.html',
+        conns,
+        daadmin: {
+          fetch: async () => { assert.fail('daadmin.fetch must not be called for Helix docs'); },
+        },
+      };
+      const body = '<main><div><p>some helix content that is long enough to avoid the empty-stub warning padding</p></div></main>';
+      const result = await persistence.put(ydoc, body);
+
+      assert(result.ok);
+      assert.equal(1, calls.length);
+      const { url, opts } = calls[0];
+      assert.equal(url, 'https://api.ent-aem.live/owner/repo/page.html');
+      assert.equal(opts.method, 'PUT');
+      assert.strictEqual(opts.body, body, 'Helix PUT body must be the raw content string, not FormData');
+      assert.equal(opts.headers.get('Content-Type'), 'text/html');
+      assert.equal(opts.headers.get('If-Match'), '*');
+      assert.equal(opts.headers.get('X-DA-Initiator'), 'collab');
+      assert.equal(opts.headers.get('Authorization'), 'Bearer abc');
+    } finally {
+      globalThis.fetch = savedFetch;
+    }
+  });
+
+  it('persistence.put for a Helix .json doc sets application/json Content-Type', async () => {
+    const savedFetch = globalThis.fetch;
+    let captured;
+    globalThis.fetch = async (url, opts) => {
+      captured = opts;
+      return { ok: true, status: 200, statusText: 'OK' };
+    };
+    try {
+      const conns = new Map();
+      conns.set({ auth: 'a' }, new Set());
+      const ydoc = {
+        name: 'https://api.ent-aem.live/o/r/d.json',
+        conns,
+        daadmin: {},
+      };
+      const longBody = '{"data":"long enough to not trigger empty stub warning padding padding padding"}';
+      await persistence.put(ydoc, longBody);
+      assert.equal(captured.headers.get('Content-Type'), 'application/json');
+      assert.strictEqual(captured.body, longBody);
+    } finally {
+      globalThis.fetch = savedFetch;
+    }
+  });
+
+  it('persistence.put for a da-admin doc uses FormData and omits Content-Type', async () => {
+    const calls = [];
+    const daadmin = {
+      fetch: async (url, opts) => {
+        calls.push({ url, opts });
+        return { ok: true, status: 200, statusText: 'OK' };
+      },
+    };
+    const conns = new Map();
+    conns.set({ auth: 'a' }, new Set());
+    const ydoc = { name: 'https://admin.da.live/source/x.html', conns, daadmin };
+    const body = 'plain html content larger than empty stub padding padding padding padding padding padding';
+    await persistence.put(ydoc, body);
+
+    assert.equal(1, calls.length);
+    assert(calls[0].opts.body instanceof FormData, 'da-admin PUT must use FormData');
+    assert.equal(
+      await calls[0].opts.body.get('data').text(),
+      body,
+      'FormData data part must contain the content',
+    );
+    assert.equal(
+      calls[0].opts.headers.get('Content-Type'),
+      null,
+      'da-admin path must not set Content-Type explicitly (FormData boundary handles it)',
+    );
+  });
+
+  it('persistence.bindState reads a Helix doc through the global fetch', async () => {
+    const savedFetch = globalThis.fetch;
+    const savedUpdate = persistence.update;
+    const calls = [];
+    globalThis.fetch = async (url, opts) => {
+      calls.push({ url, opts });
+      return {
+        ok: true, text: async () => 'helix content', status: 200, statusText: 'OK',
+      };
+    };
+    persistence.update = async () => {};
+    try {
+      const docName = 'https://api.ent-aem.live/o/r/bindstate.html';
+      const ydoc = new Y.Doc();
+      ydoc.daadmin = {
+        fetch: async () => { assert.fail('daadmin.fetch must not be called for Helix docs'); },
+      };
+      const mockConn = { auth: 'Bearer x' };
+      setYDoc(docName, ydoc);
+      const storage = { list: async () => new Map() };
+
+      await persistence.bindState(docName, ydoc, mockConn, storage);
+
+      assert.equal(1, calls.length, 'bindState must read the doc via the Helix backend');
+      assert.equal(docName, calls[0].url);
+      assert.equal('Bearer x', calls[0].opts.headers.get('Authorization'));
+    } finally {
+      globalThis.fetch = savedFetch;
+      persistence.update = savedUpdate;
     }
   });
 });

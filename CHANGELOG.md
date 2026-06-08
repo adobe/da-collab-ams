@@ -1,3 +1,133 @@
+# [1.7.0](https://github.com/adobe/da-collab/compare/v1.6.0...v1.7.0) (2026-06-08)
+
+
+### Features
+
+* support Helix backend ([#160](https://github.com/adobe/da-collab/issues/160)) ([b62a603](https://github.com/adobe/da-collab/commit/b62a603786cd84d8e0cec2b1c40213857f7d8c27))
+
+# [1.6.0](https://github.com/adobe/da-collab/compare/v1.5.3...v1.6.0) (2026-05-21)
+
+
+### Features
+
+* **dep:** replace lodash with a local debounce utility ([#158](https://github.com/adobe/da-collab/issues/158)) ([6131311](https://github.com/adobe/da-collab/commit/6131311d9796dc7697c4b20b778f3304c67c7c09))
+
+## [1.5.3](https://github.com/adobe/da-collab/compare/v1.5.2...v1.5.3) (2026-05-20)
+
+
+### Bug Fixes
+
+* **edge,shareddoc:** ws auth close via message listener + flush save deadlock ([#157](https://github.com/adobe/da-collab/issues/157)) ([ed718ee](https://github.com/adobe/da-collab/commit/ed718ee1a57a681821722fd27610b75fd2437829))
+
+
+### Reverts
+
+* remove wsAuthFailureResponse ([#149](https://github.com/adobe/da-collab/issues/149)) ([#156](https://github.com/adobe/da-collab/issues/156)) ([cf6ad46](https://github.com/adobe/da-collab/commit/cf6ad462fc5ab68f6936aca1a8fd9c37330c6c3b))
+
+## [1.5.2](https://github.com/adobe/da-collab/compare/v1.5.1...v1.5.2) (2026-05-19)
+
+
+### Bug Fixes
+
+* **edge:** send() before close() to prevent CF runtime exception ([38f8b90](https://github.com/adobe/da-collab/commit/38f8b907ccf65499dae120449c74aace488c6816))
+
+## [1.5.1](https://github.com/adobe/da-collab/compare/v1.5.0...v1.5.1) (2026-05-19)
+
+
+### Bug Fixes
+
+* **edge:** suppress CF "Network connection lost." exceptions on WS auth failures ([#155](https://github.com/adobe/da-collab/issues/155)) ([d7b5b59](https://github.com/adobe/da-collab/commit/d7b5b595310c78ba7f7665a1982d000981ab5847))
+
+# [1.5.0](https://github.com/adobe/da-collab/compare/v1.4.2...v1.5.0) (2026-05-19)
+
+
+### Bug Fixes
+
+* preserve pending Yjs changes across DO evictions via lastsync CF storage marker ([#153](https://github.com/adobe/da-collab/issues/153)) ([defb16c](https://github.com/adobe/da-collab/commit/defb16c3479b8b703b49c8962ceb83c4bfe5b8f0))
+
+
+### Features
+
+* adopt Cloudflare WebSocket Hibernation API ([#137](https://github.com/adobe/da-collab/issues/137)) ([61e6000](https://github.com/adobe/da-collab/commit/61e6000db0bd101a45bac63c95dc8505008bbad3))
+* WebSocket flush protocol for force-save before Preview/Publish ([#152](https://github.com/adobe/da-collab/issues/152)) ([8bf0ff4](https://github.com/adobe/da-collab/commit/8bf0ff4b391de25fb031ce823497bea074d8818e))
+
+## [1.4.2](https://github.com/adobe/da-collab/compare/v1.4.1...v1.4.2) (2026-05-15)
+
+
+### Bug Fixes
+
+* **edge:** signal WebSocket auth failures with custom close codes ([#149](https://github.com/adobe/da-collab/issues/149)) ([5b192a9](https://github.com/adobe/da-collab/commit/5b192a9f730702c5cbd247ff7c21506cd63a381d))
+
+## [1.4.1](https://github.com/adobe/da-collab/compare/v1.4.0...v1.4.1) (2026-05-13)
+
+
+### Bug Fixes
+
+* **docroom:** include docName in da-admin restore failure log ([#146](https://github.com/adobe/da-collab/issues/146)) ([779963d](https://github.com/adobe/da-collab/commit/779963d7adc278c4594a0674d3162768737d808c))
+
+# [1.4.0](https://github.com/adobe/da-collab/compare/v1.3.0...v1.4.0) (2026-05-13)
+
+
+### Features
+
+* flush pending save on last WebSocket connection close ([#148](https://github.com/adobe/da-collab/issues/148)) ([27b5fc0](https://github.com/adobe/da-collab/commit/27b5fc0b3151c9e783bcefdc85818c7135272264))
+
+# [1.3.0](https://github.com/adobe/da-collab/compare/v1.2.7...v1.3.0) (2026-05-13)
+
+
+### Features
+
+* add targeted session logging to diagnose content-loss ([#147](https://github.com/adobe/da-collab/issues/147)) ([f96ce19](https://github.com/adobe/da-collab/commit/f96ce19bc39af7916726e5c74e1af58022a01e4b))
+
+## [1.2.7](https://github.com/adobe/da-collab/compare/v1.2.6...v1.2.7) (2026-05-13)
+
+
+### Bug Fixes
+
+* guard persistence.put against empty-stub overwrites (COR-31) ([#142](https://github.com/adobe/da-collab/issues/142)) ([037976a](https://github.com/adobe/da-collab/commit/037976ac47fcf6a82dca747bd59f2b555c525486))
+
+## [1.2.6](https://github.com/adobe/da-collab/compare/v1.2.5...v1.2.6) (2026-05-12)
+
+
+### Bug Fixes
+
+* **docroom:** include docName in update-failure log ([#143](https://github.com/adobe/da-collab/issues/143)) ([0c130c5](https://github.com/adobe/da-collab/commit/0c130c5b6040088c1999b8f987e9bdbf2f38a539))
+
+## [1.2.5](https://github.com/adobe/da-collab/compare/v1.2.4...v1.2.5) (2026-05-11)
+
+
+### Bug Fixes
+
+* guard debounced save against concurrent PUT calls ([#140](https://github.com/adobe/da-collab/issues/140)) ([3eba8af](https://github.com/adobe/da-collab/commit/3eba8af5e819525bd4809e82c6939a7189e259d2))
+
+## [1.2.4](https://github.com/adobe/da-collab/compare/v1.2.3...v1.2.4) (2026-05-05)
+
+
+### Bug Fixes
+
+* demote expected platform events to info and eliminate unknown worker outcomes ([#135](https://github.com/adobe/da-collab/issues/135)) ([f72ff4b](https://github.com/adobe/da-collab/commit/f72ff4b33e6092863236672bb1d894022300f96e))
+
+## [1.2.3](https://github.com/adobe/da-collab/compare/v1.2.2...v1.2.3) (2026-05-05)
+
+
+### Bug Fixes
+
+* avoid storage.deleteAll() in storeState to prevent Cloudflare DO reset bug ([#133](https://github.com/adobe/da-collab/issues/133)) ([4ebbddc](https://github.com/adobe/da-collab/commit/4ebbddc51048109ceb96e212d1d9397cdd9787ee))
+
+## [1.2.2](https://github.com/adobe/da-collab/compare/v1.2.1...v1.2.2) (2026-05-05)
+
+
+### Bug Fixes
+
+* skip stale da-admin reload when client pushes Y.js state after reconnect ([#136](https://github.com/adobe/da-collab/issues/136)) ([a8ddc23](https://github.com/adobe/da-collab/commit/a8ddc23256f91e8e020b6d34ca5fdd6e39c37f45))
+
+## [1.2.1](https://github.com/adobe/da-collab/compare/v1.2.0...v1.2.1) (2026-04-30)
+
+
+### Bug Fixes
+
+* propagate HTTP status from persistence.get through DocRoom.fetch response ([#134](https://github.com/adobe/da-collab/issues/134)) ([eac219d](https://github.com/adobe/da-collab/commit/eac219d553991b8de7e9ae2812a7508173a028f2))
+
 # [1.2.0](https://github.com/adobe/da-collab/compare/v1.1.2...v1.2.0) (2026-02-26)
 
 

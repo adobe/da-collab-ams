@@ -12,8 +12,19 @@
 /* eslint-disable no-unused-vars */
 import assert from 'node:assert';
 
-import defaultEdge, { DocRoom, handleApiRequest, handleErrors } from '../src/edge.js';
+import defaultEdge, {
+  DocRoom, handleApiRequest, handleErrors, wsAuthFailureResponse,
+} from '../src/edge.js';
 import { WSSharedDoc, persistence, setYDoc } from '../src/shareddoc.js';
+
+function makeCtx(storage = null) {
+  const accepted = [];
+  return {
+    storage,
+    accepted,
+    acceptWebSocket(ws) { accepted.push(ws); },
+  };
+}
 
 async function sleep(ms) {
   return new Promise((resolve) => {
@@ -301,17 +312,17 @@ describe('Worker test suite', () => {
         return new Map();
       };
 
-      const wspCalled = [];
+      const attachCalled = [];
       const wsp0 = {};
       const wsp1 = {
-        accept() { wspCalled.push('accept'); },
-        addEventListener(type) { wspCalled.push(`addEventListener ${type}`); },
-        close() { wspCalled.push('close'); },
+        serializeAttachment(data) { attachCalled.push(data); },
+        close() {},
       };
       DocRoom.newWebSocketPair = () => [wsp0, wsp1];
 
       const daadmin = { blah: 1234 };
-      const dr = new DocRoom({ storage: null }, { daadmin });
+      const ctx = makeCtx(null);
+      const dr = new DocRoom(ctx, { daadmin });
       const headers = new Headers({
         Upgrade: 'websocket',
         Authorization: 'au123',
@@ -322,25 +333,30 @@ describe('Worker test suite', () => {
         headers,
         url: 'http://localhost:4711/',
       };
+
+      // fetch returns 101 immediately; Hibernation API accepts the socket synchronously.
       const resp = await dr.fetch(req, {}, 306);
       assert.equal(resp.headers.get('sec-websocket-protocol'), undefined);
       assert.equal(306 /* fabricated websocket response code */, resp.status);
 
+      // CF Hibernation API: acceptWebSocket must be called before the response is returned
+      assert.equal(1, ctx.accepted.length, 'acceptWebSocket must be called');
+      assert.equal(wsp1, ctx.accepted[0], 'acceptWebSocket called with server socket');
+
+      // serializeAttachment must carry docName and auth for hibernation recovery
+      assert.equal(1, attachCalled.length);
+      assert.equal('http://foo.bar/1/2/3.html', attachCalled[0].docName);
+      assert.equal('au123', attachCalled[0].auth);
+
+      // Auth set synchronously before initSession runs
+      assert.equal('au123', wsp1.auth);
+
+      // Wait for the async session setup to complete
+      await sleep(10);
+
       assert.equal(1, bindCalled.length);
       assert.equal('http://foo.bar/1/2/3.html', bindCalled[0].nm);
       assert.equal('1234', bindCalled[0].d.daadmin.blah);
-
-      assert.equal('au123', wsp1.auth);
-
-      const acceptIdx = wspCalled.indexOf('accept');
-      const alMessIdx = wspCalled.indexOf('addEventListener message');
-      const alClsIdx = wspCalled.indexOf('addEventListener close');
-      const clsIdx = wspCalled.indexOf('close');
-
-      assert(acceptIdx >= 0);
-      assert(alMessIdx > acceptIdx);
-      assert(alClsIdx > alMessIdx);
-      assert(clsIdx > alClsIdx);
     } finally {
       DocRoom.newWebSocketPair = savedNWSP;
       persistence.bindState = savedBS;
@@ -356,14 +372,13 @@ describe('Worker test suite', () => {
 
       const wsp0 = {};
       const wsp1 = {
-        accept() { },
-        addEventListener(type) { },
-        close() { },
+        serializeAttachment() {},
+        close() {},
       };
       DocRoom.newWebSocketPair = () => [wsp0, wsp1];
 
       const daadmin = { blah: 1234 };
-      const dr = new DocRoom({ storage: null }, { daadmin });
+      const dr = new DocRoom(makeCtx(null), { daadmin });
       const headers = new Headers({
         Upgrade: 'websocket',
         Authorization: 'au123',
@@ -419,37 +434,60 @@ describe('Worker test suite', () => {
       persistence.bindState = async () => {
         // eslint-disable-next-line max-len
         await sleep(1); // the real bindState is async and we only reset the failed doc in the promise
-        throw new Error('unable to get resource - status: 404');
+        const err = new Error('unable to get resource - status: 404');
+        err.status = 404;
+        throw err;
       };
 
+      const closeCalled = [];
       const wsp0 = {};
       const wsp1 = {
-        accept() {},
-        addEventListener() {},
-        close() {},
+        serializeAttachment() {},
+        close(...args) { closeCalled.push(args); },
       };
       DocRoom.newWebSocketPair = () => [wsp0, wsp1];
 
       const daadmin = { fetch: async () => ({ ok: true }) };
-      const dr = new DocRoom({ storage: null }, { daadmin });
+      const dr = new DocRoom(makeCtx(null), { daadmin });
       const headers = new Map();
       headers.set('Upgrade', 'websocket');
       headers.set('X-collab-room', 'http://foo.bar/test.html');
       headers.set('X-auth-actions', 'read=allow,write=allow');
 
-      const req = {
-        headers,
-        url: 'http://localhost:4711/',
-      };
+      const req = { headers, url: 'http://localhost:4711/' };
 
+      // fetch returns 101 immediately; setup fails asynchronously
       const resp = await dr.fetch(req, {}, 306);
+      assert.equal(306, resp.status, 'fetch must return 101 immediately, not wait for setup');
 
-      // Should return 500 error when bindState fails
-      assert.equal(500, resp.status);
-      assert.equal('Internal Server Error', await resp.text());
+      // Wait for the async setup to fail
+      await sleep(20);
+
+      assert.equal(1, closeCalled.length, 'server socket must be closed on setup failure');
+      assert.equal(1011, closeCalled[0][0]);
     } finally {
       DocRoom.newWebSocketPair = savedNWSP;
       persistence.bindState = savedBS;
+    }
+  });
+
+  it('Test DocRoom fetch synchronous error returns 500', async () => {
+    const savedNWSP = DocRoom.newWebSocketPair;
+    try {
+      DocRoom.newWebSocketPair = () => {
+        throw new Error('pair creation failed');
+      };
+
+      const dr = new DocRoom({ storage: null }, {});
+      const headers = new Map();
+      headers.set('Upgrade', 'websocket');
+      headers.set('X-collab-room', 'http://foo.bar/test.html');
+
+      const req = { headers, url: 'http://localhost:4711/' };
+      const resp = await dr.fetch(req);
+      assert.equal(500, resp.status);
+    } finally {
+      DocRoom.newWebSocketPair = savedNWSP;
     }
   });
 
@@ -458,38 +496,35 @@ describe('Worker test suite', () => {
     const savedBS = persistence.bindState;
 
     try {
-      // Mock bindState to throw an exception
-      persistence.bindState = async (nm, d, c) => {
-        // eslint-disable-next-line max-len
-        await sleep(1); // the real bindState is async and we only reset the failed doc in the promise
+      persistence.bindState = async () => {
+        await sleep(1);
         throw new Error('WebSocket setup error');
       };
 
-      // Mock WebSocketPair to return valid objects
+      const closeCalled = [];
       const wsp0 = {};
       const wsp1 = {
-        accept() {},
-        addEventListener() {},
-        close() {},
+        serializeAttachment() {},
+        close(...args) { closeCalled.push(args); },
       };
       DocRoom.newWebSocketPair = () => [wsp0, wsp1];
 
       const daadmin = { test: 'value' };
-      const dr = new DocRoom({ storage: null }, { daadmin });
+      const dr = new DocRoom(makeCtx(null), { daadmin });
       const headers = new Map();
       headers.set('Upgrade', 'websocket');
       headers.set('Authorization', 'au123');
       headers.set('X-collab-room', 'http://foo.bar/test.html');
 
-      const req = {
-        headers,
-        url: 'http://localhost:4711/',
-      };
-      const resp = await dr.fetch(req);
+      const req = { headers, url: 'http://localhost:4711/' };
 
-      // Should return 500 error due to exception in WebSocket setup
-      assert.equal(500, resp.status);
-      assert.equal('Internal Server Error', await resp.text());
+      const resp = await dr.fetch(req, {}, 306);
+      assert.equal(306, resp.status, 'fetch must return 101 immediately');
+
+      await sleep(20);
+
+      assert.equal(1, closeCalled.length, 'server socket must be closed on setup failure');
+      assert.equal(1011, closeCalled[0][0]);
     } finally {
       DocRoom.newWebSocketPair = savedNWSP;
       persistence.bindState = savedBS;
@@ -553,6 +588,7 @@ describe('Worker test suite', () => {
 
     // Mock WebSocketPair since it's not available in Node.js test environment
     const messages = [];
+    // eslint-disable-next-line func-names
     const mockWebSocketPair = function () {
       const pair = [null, null];
       pair[0] = { // client side
@@ -609,6 +645,7 @@ describe('Worker test suite', () => {
 
     // Mock WebSocketPair since it's not available in Node.js test environment
     const messages = [];
+    // eslint-disable-next-line func-names
     const mockWebSocketPair = function () {
       const pair = [null, null];
       pair[0] = { // client side
@@ -792,7 +829,7 @@ describe('Worker test suite', () => {
     assert.equal('unable to get resource', await res.text());
   });
 
-  it('Test handleApiRequest not authorized', async () => {
+  it('Test handleApiRequest not authorized (non-WS)', async () => {
     const req = {
       url: 'http://do.re.mi/https://admin.da.live/hihi.html',
       headers: new Headers(),
@@ -804,6 +841,91 @@ describe('Worker test suite', () => {
 
     const res = await handleApiRequest(req, env);
     assert.equal(401, res.status);
+  });
+
+  async function testWsUpgradeAuthFailure(httpStatus, expectedCode, expectedReason, protocol) {
+    const req = {
+      url: 'http://do.re.mi/https://admin.da.live/hihi.html',
+      headers: new Headers({ Upgrade: 'websocket', 'sec-websocket-protocol': protocol }),
+    };
+    const env = { daadmin: { fetch: async () => new Response(null, { status: httpStatus }) } };
+
+    const ops = [];
+    let triggerMessage;
+    globalThis.WebSocketPair = function MockWSP() {
+      const server = {
+        accept() { ops.push('accept'); },
+        addEventListener(type, fn) {
+          ops.push(['addEventListener', type]);
+          if (type === 'message') {
+            triggerMessage = fn;
+          }
+        },
+        close(c, r) { ops.push(['close', c, r]); },
+      };
+      return [{}, server];
+    };
+    try {
+      try {
+        await handleApiRequest(req, env);
+      } catch (e) {
+        // status 101 may not be constructable in node test env; listener assertions cover it
+      }
+      const expectedListeners = ['accept', ['addEventListener', 'message'], ['addEventListener', 'error'], ['addEventListener', 'close']];
+      assert.deepEqual(ops, expectedListeners);
+      assert(triggerMessage !== undefined, 'message listener must be registered');
+      triggerMessage();
+      assert.deepEqual(ops, [...expectedListeners, ['close', expectedCode, expectedReason]]);
+    } finally {
+      delete globalThis.WebSocketPair;
+    }
+  }
+
+  it('Test handleApiRequest not authorized (WS upgrade) -> 4401 close', async () => {
+    await testWsUpgradeAuthFailure(401, 4401, 'auth', 'yjs, stale-token');
+  });
+
+  it('Test handleApiRequest forbidden (WS upgrade) -> 4403 close', async () => {
+    await testWsUpgradeAuthFailure(403, 4403, 'forbidden', 'yjs, t');
+  });
+
+  it('Test wsAuthFailureResponse closes via safety timeout when client never sends', async () => {
+    const ops = [];
+    let closeTimer;
+    const origSetTimeout = globalThis.setTimeout;
+    const origClearTimeout = globalThis.clearTimeout;
+    globalThis.setTimeout = (fn, ms) => {
+      closeTimer = { fn, ms };
+      return closeTimer;
+    };
+    globalThis.clearTimeout = (t) => {
+      if (t === closeTimer) {
+        closeTimer = null;
+      }
+    };
+    globalThis.WebSocketPair = function MockWSP() {
+      const server = {
+        accept() { ops.push('accept'); },
+        addEventListener() {},
+        close(c, r) { ops.push(['close', c, r]); },
+      };
+      return [{}, server];
+    };
+    try {
+      try {
+        wsAuthFailureResponse(new Headers(), 4401, 'auth');
+      } catch (e) {
+        // status 101 is not constructable in Node test env — listeners are set up before the throw
+      }
+      assert(closeTimer !== undefined, 'safety timeout must be armed');
+      assert.equal(closeTimer.ms, 5000);
+      closeTimer.fn();
+      assert.deepEqual(ops, ['accept', ['close', 4401, 'auth']]);
+    } finally {
+      globalThis.setTimeout = origSetTimeout;
+      globalThis.clearTimeout = origClearTimeout;
+      delete globalThis.WebSocketPair;
+    }
   });
 
   it('Test handleApiRequest da-admin fetch exception', async () => {
@@ -926,5 +1048,431 @@ describe('Worker test suite', () => {
     const json = await res.json();
     assert.equal('ok', json.status);
     assert.deepStrictEqual(['da-admin'], json.service_bindings);
+  });
+
+  it('Test DocRoom webSocketMessage restores auth and processes message (cold start)', async () => {
+    const savedBS = persistence.bindState;
+    try {
+      const bindCalled = [];
+      persistence.bindState = async (nm, d, c) => {
+        bindCalled.push({ nm, c });
+        return new Map();
+      };
+
+      const docName = 'http://foo.bar/cold-start.html';
+      // Doc is NOT in the map — simulates hibernation eviction
+
+      const closeCalled = [];
+      const mockConn = {
+        auth: undefined,
+        readOnly: undefined,
+        binaryType: undefined,
+        readyState: 1,
+        send() {},
+        close() { closeCalled.push('close'); },
+        deserializeAttachment() {
+          // authActions format: comma-separated values extracted after '=' from X-da-actions header
+          return { docName, auth: 'Bearer session-token', authActions: 'read,write' };
+        },
+      };
+
+      const dr = new DocRoom(makeCtx({}), { daadmin: {} });
+      const msg = new Uint8Array([0, 0]).buffer; // minimal message
+
+      await dr.webSocketMessage(mockConn, msg);
+
+      // Auth must be restored from the serialized attachment
+      assert.equal('Bearer session-token', mockConn.auth);
+      assert.equal(undefined, mockConn.readOnly); // write is in authActions
+      // Doc should have been initialized (bindState called)
+      assert.equal(1, bindCalled.length);
+      assert.equal(docName, bindCalled[0].nm);
+    } finally {
+      persistence.bindState = savedBS;
+    }
+  });
+
+  it('Test DocRoom webSocketMessage warm start (doc already in memory)', async () => {
+    const savedBS = persistence.bindState;
+    try {
+      const bindCalled = [];
+      persistence.bindState = async (nm) => {
+        bindCalled.push(nm);
+        return new Map();
+      };
+
+      const docName = 'http://foo.bar/warm-start.html';
+      const testYdoc = new WSSharedDoc(docName);
+      const mockConn = {
+        auth: undefined,
+        binaryType: undefined,
+        readyState: 1,
+        send() {},
+        close() {},
+        deserializeAttachment() {
+          return { docName, auth: 'Bearer warm-token', authActions: 'write' };
+        },
+      };
+      testYdoc.conns.set(mockConn, new Set());
+      setYDoc(docName, testYdoc);
+
+      try {
+        const dr = new DocRoom(makeCtx({}), { daadmin: {} });
+        const msg = new Uint8Array([0]).buffer;
+        await dr.webSocketMessage(mockConn, msg);
+
+        assert.equal('Bearer warm-token', mockConn.auth);
+        // Doc was in memory — bindState must NOT be called again
+        assert.equal(0, bindCalled.length);
+      } finally {
+        testYdoc.destroy();
+      }
+    } finally {
+      persistence.bindState = savedBS;
+    }
+  });
+
+  it('Test DocRoom webSocketClose cleans up connection', async () => {
+    const docName = 'http://foo.bar/ws-close.html';
+    const testYdoc = new WSSharedDoc(docName);
+
+    const closeCalled = [];
+    const mockConn = {
+      close() { closeCalled.push('close'); },
+      deserializeAttachment() {
+        return { docName, auth: 'test-auth', authActions: 'write=allow' };
+      },
+    };
+    testYdoc.conns.set(mockConn, new Set());
+    const m = setYDoc(docName, testYdoc);
+
+    const dr = new DocRoom(makeCtx(null), {});
+    dr.webSocketClose(mockConn, 1000, 'Normal', true);
+
+    assert.deepStrictEqual(['close'], closeCalled);
+    assert(!m.has(docName), 'Doc should be removed when no connections remain');
+
+    testYdoc.destroy();
+  });
+
+  it('Test DocRoom webSocketError logs and cleans up connection', async () => {
+    const docName = 'http://foo.bar/ws-error.html';
+    const testYdoc = new WSSharedDoc(docName);
+
+    const closeCalled = [];
+    const mockConn = {
+      close() { closeCalled.push('close'); },
+      deserializeAttachment() {
+        return { docName, auth: undefined, authActions: '' };
+      },
+    };
+    testYdoc.conns.set(mockConn, new Set());
+    const m = setYDoc(docName, testYdoc);
+
+    const dr = new DocRoom(makeCtx(null), {});
+    dr.webSocketError(mockConn, new Error('connection reset'));
+
+    assert.deepStrictEqual(['close'], closeCalled);
+    assert(!m.has(docName), 'Doc should be removed on error');
+
+    testYdoc.destroy();
+  });
+
+  it('Test DocRoom webSocketClose no-op when doc not in memory', async () => {
+    const mockConn = {
+      close() { assert.fail('close must not be called when doc is not in memory'); },
+      deserializeAttachment() {
+        return { docName: 'http://foo.bar/gone.html', auth: undefined, authActions: '' };
+      },
+    };
+
+    const dr = new DocRoom(makeCtx(null), {});
+    dr.webSocketClose(mockConn, 1000, 'Normal', true);
+    // No assertion needed — test passes if close() is not called
+  });
+
+  it('Test DocRoom webSocketMessage read-only auth restored', async () => {
+    const savedBS = persistence.bindState;
+    try {
+      persistence.bindState = async () => new Map();
+
+      const docName = 'http://foo.bar/readonly.html';
+      const mockConn = {
+        auth: undefined,
+        readOnly: undefined,
+        binaryType: undefined,
+        readyState: 1,
+        send() {},
+        close() {},
+        deserializeAttachment() {
+          // authActions without 'write' — should be read-only
+          return { docName, auth: 'Bearer ro-token', authActions: 'read' };
+        },
+      };
+
+      const dr = new DocRoom(makeCtx({}), { daadmin: {} });
+      await dr.webSocketMessage(mockConn, new Uint8Array([0]).buffer);
+
+      assert.equal('Bearer ro-token', mockConn.auth);
+      assert.equal(true, mockConn.readOnly);
+    } finally {
+      persistence.bindState = savedBS;
+    }
+  });
+
+  // ---------------------------------------------------------------------------
+  // Backend resolution (api-live-switch branch)
+  //
+  // The backend is derived from the doc URL alone — there is no X-is-helix
+  // header or isHelix attachment field. api.ent-aem.live docs are reached via the
+  // global fetch; everything else via the da-admin service binding.
+  // ---------------------------------------------------------------------------
+
+  it('Test handleApiRequest routes an api.ent-aem.live HEAD through the global fetch', async () => {
+    const savedFetch = globalThis.fetch;
+    const helixCalls = [];
+    globalThis.fetch = async (url, opts) => {
+      helixCalls.push({ url, opts });
+      return new Response(null, { status: 200 });
+    };
+
+    const roomFetchCalls = [];
+    const myRoom = {
+      fetch(req) {
+        roomFetchCalls.push(req);
+        return new Response(null, { status: 306 });
+      },
+    };
+    const daadminCalls = [];
+    const daadmin = {
+      fetch: async (url, opts) => {
+        daadminCalls.push({ url, opts });
+        return new Response(null, { status: 200 });
+      },
+    };
+    const rooms = {
+      idFromName(nm) { return `id${hash(nm)}`; },
+      get() { return myRoom; },
+    };
+    const env = { rooms, daadmin };
+
+    try {
+      const req = {
+        url: 'http://do.re.mi/https://api.ent-aem.live/o/r/p.html',
+        headers: new Headers(),
+      };
+      const res = await handleApiRequest(req, env);
+      assert.equal(306, res.status);
+
+      assert.equal(1, helixCalls.length, 'the global fetch must be used for the Helix HEAD');
+      assert.equal('HEAD', helixCalls[0].opts.method);
+      assert.equal('https://api.ent-aem.live/o/r/p.html', helixCalls[0].url);
+      assert.equal(0, daadminCalls.length, 'daadmin.fetch must NOT be called for Helix docs');
+
+      assert.equal(1, roomFetchCalls.length);
+      assert.equal(
+        'https://api.ent-aem.live/o/r/p.html',
+        roomFetchCalls[0].headers.get('X-collab-room'),
+      );
+      assert.equal(
+        null,
+        roomFetchCalls[0].headers.get('X-is-helix'),
+        'X-is-helix header must no longer be sent — the room derives the backend from the doc URL',
+      );
+    } finally {
+      globalThis.fetch = savedFetch;
+    }
+  });
+
+  it('Test handleApiRequest routes a da-admin HEAD through the daadmin binding', async () => {
+    const savedFetch = globalThis.fetch;
+    globalThis.fetch = async () => {
+      assert.fail('global fetch must not be used for da-admin docs');
+    };
+
+    const daadminCalls = [];
+    const daadmin = {
+      fetch: async (url, opts) => {
+        daadminCalls.push({ url, opts });
+        return new Response(null, { status: 200 });
+      },
+    };
+    const myRoom = {
+      fetch() { return new Response(null, { status: 306 }); },
+    };
+    const rooms = {
+      idFromName(nm) { return `id${hash(nm)}`; },
+      get() { return myRoom; },
+    };
+    const env = { rooms, daadmin };
+
+    try {
+      const req = {
+        url: 'http://do.re.mi/https://admin.da.live/some.html',
+        headers: new Headers(),
+      };
+      const res = await handleApiRequest(req, env);
+      assert.equal(306, res.status);
+      assert.equal(1, daadminCalls.length, 'daadmin.fetch must be used for da-admin docs');
+      assert.equal('HEAD', daadminCalls[0].opts.method);
+    } finally {
+      globalThis.fetch = savedFetch;
+    }
+  });
+
+  it('Test handleApiRequest still rejects api.ent-aem.* hosts that are not api.ent-aem.live', async () => {
+    const req = {
+      url: 'http://do.re.mi/https://api.ent-aem.fake/laaa.html',
+      headers: new Headers(),
+    };
+    const res = await handleApiRequest(req, { daadmin: {} });
+    assert.equal(404, res.status, 'Only api.ent-aem.live (with trailing slash) is whitelisted');
+  });
+
+  it('Test DocRoom fetch forces read,write authActions for an api.ent-aem.live doc', async () => {
+    const savedNWSP = DocRoom.newWebSocketPair;
+    const savedBS = persistence.bindState;
+
+    try {
+      persistence.bindState = async () => new Map();
+
+      const attachCalled = [];
+      const wsp1 = {
+        serializeAttachment(data) { attachCalled.push(data); },
+        close() {},
+      };
+      DocRoom.newWebSocketPair = () => [{}, wsp1];
+
+      const dr = new DocRoom(makeCtx(null), { daadmin: {} });
+      const headers = new Headers({
+        Upgrade: 'websocket',
+        Authorization: 'au-helix',
+        'X-collab-room': 'https://api.ent-aem.live/o/r/p.html',
+        // Empty X-auth-actions would normally mark the conn read-only; for a
+        // Helix doc the backend's read,write default must override it.
+        'X-auth-actions': '',
+      });
+      const req = { headers, url: 'http://localhost:4711/' };
+      const resp = await dr.fetch(req, {}, 306);
+
+      assert.equal(306, resp.status);
+      assert.equal(1, attachCalled.length);
+      assert.equal('https://api.ent-aem.live/o/r/p.html', attachCalled[0].docName);
+      assert.equal('au-helix', attachCalled[0].auth);
+      assert.equal(
+        'read,write',
+        attachCalled[0].authActions,
+        'Helix backend must force read,write authActions until Helix reports them',
+      );
+      assert.equal(
+        false,
+        Object.prototype.hasOwnProperty.call(attachCalled[0], 'isHelix'),
+        'attachment must no longer carry an isHelix field',
+      );
+      assert.notEqual(true, wsp1.readOnly, 'must not be marked readOnly when the backend forces write');
+    } finally {
+      DocRoom.newWebSocketPair = savedNWSP;
+      persistence.bindState = savedBS;
+    }
+  });
+
+  it('Test DocRoom fetch honours X-auth-actions for a da-admin doc', async () => {
+    const savedNWSP = DocRoom.newWebSocketPair;
+    const savedBS = persistence.bindState;
+
+    try {
+      persistence.bindState = async () => new Map();
+
+      const attachCalled = [];
+      const wsp1 = {
+        serializeAttachment(data) { attachCalled.push(data); },
+        close() {},
+      };
+      DocRoom.newWebSocketPair = () => [{}, wsp1];
+
+      const dr = new DocRoom(makeCtx(null), { daadmin: {} });
+      const headers = new Headers({
+        Upgrade: 'websocket',
+        'X-collab-room': 'https://admin.da.live/foo.html',
+        'X-auth-actions': 'read',
+      });
+      const req = { headers, url: 'http://localhost:4711/' };
+      await dr.fetch(req, {}, 306);
+
+      assert.equal('read', attachCalled[0].authActions, 'da-admin authActions must come from the header');
+      assert.equal(true, wsp1.readOnly, 'a read-only da-admin connection must be marked readOnly');
+    } finally {
+      DocRoom.newWebSocketPair = savedNWSP;
+      persistence.bindState = savedBS;
+    }
+  });
+
+  it('Test DocRoom routes an api.aem.live doc to bindState (Helix backend derived from URL)', async () => {
+    const savedNWSP = DocRoom.newWebSocketPair;
+    const savedBS = persistence.bindState;
+
+    try {
+      const bindCalled = [];
+      persistence.bindState = async (nm, ydoc) => {
+        bindCalled.push({ nm, daadmin: ydoc.daadmin });
+        return new Map();
+      };
+
+      const wsp1 = { serializeAttachment() {}, close() {} };
+      DocRoom.newWebSocketPair = () => [{}, wsp1];
+
+      const daadmin = { mark: 'da' };
+      const dr = new DocRoom(makeCtx(null), { daadmin });
+      const headers = new Headers({
+        Upgrade: 'websocket',
+        'X-collab-room': 'https://api.ent-aem.live/x.html',
+      });
+      const req = { headers, url: 'http://localhost:4711/' };
+      const resp = await dr.fetch(req, {}, 306);
+      assert.equal(306, resp.status);
+
+      // initSession runs asynchronously after the response is returned
+      await sleep(10);
+
+      assert.equal(1, bindCalled.length);
+      assert.equal('https://api.ent-aem.live/x.html', bindCalled[0].nm);
+    } finally {
+      DocRoom.newWebSocketPair = savedNWSP;
+      persistence.bindState = savedBS;
+    }
+  });
+
+  it('Test DocRoom webSocketMessage works with an attachment that has no isHelix field', async () => {
+    const savedBS = persistence.bindState;
+    try {
+      const bindCalled = [];
+      persistence.bindState = async (nm) => {
+        bindCalled.push(nm);
+        return new Map();
+      };
+
+      const docName = 'https://api.ent-aem.live/cold-helix.html';
+      const mockConn = {
+        auth: undefined,
+        readOnly: undefined,
+        binaryType: undefined,
+        readyState: 1,
+        send() {},
+        close() {},
+        deserializeAttachment() {
+          return { docName, auth: 'Bearer t', authActions: 'read,write' };
+        },
+      };
+
+      const dr = new DocRoom(makeCtx({}), { daadmin: {} });
+      const msg = new Uint8Array([0, 0]).buffer;
+      await dr.webSocketMessage(mockConn, msg);
+
+      assert.equal('Bearer t', mockConn.auth);
+      assert.equal(1, bindCalled.length);
+      assert.equal(docName, bindCalled[0]);
+    } finally {
+      persistence.bindState = savedBS;
+    }
   });
 });

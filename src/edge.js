@@ -9,7 +9,10 @@
  * OF ANY KIND, either express or implied. See the License for the specific language
  * governing permissions and limitations under the License.
  */
-import { invalidateFromAdmin, setupWSConnection } from './shareddoc.js';
+import {
+  getBackend, handleWebSocketClose, handleWebSocketMessage,
+  invalidateFromAdmin, isHelixDoc, logError, setupWSConnection,
+} from './shareddoc.js';
 
 /**
  * This is the Edge Worker, built using Durable Objects!
@@ -128,6 +131,45 @@ async function handleApiCall(url, request, env) {
 }
 
 /**
+ * Build a 101 response whose server-side WebSocket has already been closed
+ * with a custom code. This lets the client distinguish auth failures
+ * (CloseEvent.code 4401/4403) from generic handshake failures, which the
+ * browser would otherwise surface only as opaque code 1006.
+ *
+ * @param {Headers} reqHeaders
+ * @param {number} code - close code in the application range (4000-4999)
+ * @param {string} reason
+ */
+export function wsAuthFailureResponse(reqHeaders, code, reason) {
+  // eslint-disable-next-line no-undef
+  const [client, server] = new WebSocketPair();
+  server.accept();
+  // Close with the auth failure code only AFTER the WebSocket is established.
+  // Calling close() before the 101 response is sent causes CF Workers to throw
+  // an unhandled "Network connection lost." runtime exception.
+  // The y-websocket client sends a sync message immediately on open; use that
+  // as the trigger. A 5-second safety timeout handles clients that never send.
+  // eslint-disable-next-line no-undef
+  const closeTimer = setTimeout(() => server.close(code, reason), 5000);
+  server.addEventListener('message', () => {
+    clearTimeout(closeTimer);
+    server.close(code, reason);
+  });
+  server.addEventListener('error', () => {
+    clearTimeout(closeTimer);
+  });
+  server.addEventListener('close', () => {
+    clearTimeout(closeTimer);
+  });
+  const respHeaders = new Headers();
+  const protocols = reqHeaders.get('sec-websocket-protocol')?.split(',');
+  if (protocols?.includes('yjs')) {
+    respHeaders.set('sec-websocket-protocol', 'yjs');
+  }
+  return new Response(null, { status: 101, headers: respHeaders, webSocket: client });
+}
+
+/**
  * This is where the requests for the worker come in. They can either be pure API requests or
  * requests to set up a session with a Durable Object through a Yjs WebSocket.
  *
@@ -168,6 +210,9 @@ export async function handleApiRequest(request, env) {
 
   // Make sure we only work with the configured admin origin or localhost
   if (!docName.startsWith(`${adminOrigin}/`)
+      && !docName.startsWith('https://admin.ent-da.page/')
+      && !docName.startsWith('https://stage-admin.ent-da.live/')
+      && !docName.startsWith('https://api.ent-aem.live/')
       && !docName.startsWith('http://localhost:')) {
     return new Response('unable to get resource', { status: 404 });
   }
@@ -182,13 +227,24 @@ export async function handleApiRequest(request, env) {
     }
 
     const timingBeforeDaAdminHead = Date.now();
-    const initialReq = await env.daadmin.fetch(docName, opts);
+    const initialReq = await getBackend(docName, env.daadmin).fetch(docName, opts);
 
     timingDaAdminHeadDuration = Date.now() - timingBeforeDaAdminHead;
 
     if (!initialReq.ok) {
       // eslint-disable-next-line no-console
       console.log(`[worker] Unable to get resource ${docName}: ${initialReq.status} - ${initialReq.statusText}`);
+      // For WebSocket upgrades, signal auth failures via a CloseEvent code so the
+      // client can refresh its token and reconnect (4401) or stop trying (4403).
+      // Otherwise the browser sees only a generic 1006.
+      if (request.headers.get('Upgrade') === 'websocket') {
+        if (initialReq.status === 401) {
+          return wsAuthFailureResponse(request.headers, 4401, 'auth');
+        }
+        if (initialReq.status === 403) {
+          return wsAuthFailureResponse(request.headers, 4403, 'forbidden');
+        }
+      }
       return new Response('unable to get resource', { status: initialReq.status });
     }
 
@@ -198,8 +254,7 @@ export async function handleApiRequest(request, env) {
     const daActions = initialReq.headers.get('X-da-actions') ?? '';
     [, authActions] = daActions.split('=');
   } catch (err) {
-    // eslint-disable-next-line no-console
-    console.error(`[worker] Unable to handle API request ${docName}`, err);
+    logError(err, `[worker] Unable to handle API request ${docName}`, err);
     return new Response('unable to get resource', { status: 500 });
   }
 
@@ -237,8 +292,7 @@ export async function handleApiRequest(request, env) {
     // object, regardless of the hostname in the request's URL.
     return await roomObject.fetch(req);
   } catch (err) {
-    // eslint-disable-next-line no-console
-    console.error(`[worker] Error fetching the doc from the room ${docName}`, err);
+    logError(err, `[worker] Error fetching the doc from the room ${docName}`, err);
     return new Response('unable to get resource', { status: 500 });
   }
 }
@@ -275,6 +329,9 @@ export class DocRoom {
     // `env` is our environment bindings (discussed earlier).
     this.env = env;
     this.id = controller?.id?.toString() || `no-controller-${new Date().getTime()}`;
+
+    // `ctx` is the Durable Object controller, used for the Hibernation API
+    this.ctx = controller;
   }
 
   /**
@@ -340,71 +397,116 @@ export class DocRoom {
         return new Response('expected websocket', { status: 400 });
       }
       const auth = request.headers.get('Authorization');
-      const authActions = request.headers.get('X-auth-actions') ?? '';
       const docName = request.headers.get('X-collab-room');
 
       if (!docName) {
         return new Response('expected docName', { status: 400 });
       }
 
-      const timingBeforeSetupWebsocket = Date.now();
+      // Helix does not yet report auth actions, so grant collaborators
+      // read,write; otherwise honour what da-admin reported.
+      // TODO: remove the isHelixDoc branch once Helix reports auth actions.
+      const authActions = isHelixDoc(docName)
+        ? 'read,write'
+        : request.headers.get('X-auth-actions') ?? '';
+
       // To accept the WebSocket request, we create a WebSocketPair (which is like a socketpair,
       // i.e. two WebSockets that talk to each other), we return one end of the pair in the
       // response, and we operate on the other end. Note that this API is not part of the
       // Fetch API standard; unfortunately, the Fetch API / Service Workers specs do not define
       // any way to act as a WebSocket server today.
-      const pair = DocRoom.newWebSocketPair();
+      const [client, server] = DocRoom.newWebSocketPair();
 
-      // We're going to take pair[1] as our end, and return pair[0] to the client.
-      const timingData = await this.handleSession(pair[1], docName, auth, authActions);
-      const timingSetupWebSocketDuration = Date.now() - timingBeforeSetupWebsocket;
+      // Register with CF Hibernation API: the DO can sleep between messages
+      // without losing its WebSocket connections.
+      this.ctx.acceptWebSocket(server);
+      server.serializeAttachment({ docName, auth, authActions });
+
+      server.auth = auth;
+      if (!authActions.split(',').includes('write')) {
+        // eslint-disable-next-line no-param-reassign
+        server.readOnly = true;
+      }
+
+      // eslint-disable-next-line no-console
+      console.log(`[docroom] Setting up WSConnection for ${docName} with auth(${
+        auth ? auth.substring(0, auth.indexOf(' ')) : 'none'})`);
+
+      // Kick off async document initialization; response is returned immediately.
+      this.initSession(server, docName);
 
       const reqHeaders = request.headers;
       const respheaders = new Headers({
         'X-1-timing-da-admin-head-duration': reqHeaders.get('X-timing-da-admin-head-duration'),
         'X-2-timing-docroom-get-duration': reqHeaders.get('X-timing-docroom-get-duration'),
-        'X-4-timing-da-admin-get-duration': timingData.get('timingDaAdminGetDuration'),
-        'X-5-timing-read-state-duration': timingData.get('timingReadStateDuration'),
-        'X-7-timing-setup-websocket-duration': timingSetupWebSocketDuration,
-        'X-9-timing-full-duration': Date.now() - reqHeaders.get('X-timing-start'),
       });
       const protocols = reqHeaders.get('sec-websocket-protocol')?.split(',');
       if (protocols?.includes('yjs')) {
         respheaders.set('sec-websocket-protocol', 'yjs');
       }
 
-      // Now we return the other end of the pair to the client.
-      return new Response(null, { status: successCode, headers: respheaders, webSocket: pair[0] });
+      return new Response(null, { status: successCode, headers: respheaders, webSocket: client });
     } catch (err) {
-      // eslint-disable-next-line no-console
-      console.error('[docroom] Error while fetching', err);
-      return new Response('Internal Server Error', { status: 500 });
+      logError(err, '[docroom] Error while fetching', err);
+      const status = err.status ?? 500;
+      const body = status === 500 ? 'Internal Server Error' : err.message;
+      return new Response(body, { status });
     }
   }
 
   /**
-   * Implements our WebSocket-based protocol.
+   * Async document initialization, called after CF Hibernation API has accepted the WebSocket.
+   * Auth properties must already be set on webSocket before calling this.
    * @param {WebSocket} webSocket - The WebSocket connection to the client
    * @param {string} docName - The document name
-   * @param {string} auth - The authorization header
-   * @param {string} authActions
    */
-  async handleSession(webSocket, docName, auth, authActions) {
-    // Accept our end of the WebSocket. This tells the runtime that we'll be terminating the
-    // WebSocket in JavaScript, not sending it elsewhere.
-    webSocket.accept();
+  async initSession(webSocket, docName) {
+    try {
+      await setupWSConnection(webSocket, docName, this.env, this.storage, true);
+    } catch (err) {
+      logError(err, '[docroom] Error during session setup', docName, err);
+      try {
+        webSocket.close(1011, err.message);
+      } catch (_) { /* already closed */ }
+    }
+  }
+
+  /**
+   * CF Hibernation API: called when a message arrives on a hibernated WebSocket.
+   * Re-hydrates the Yjs session if the DO was evicted since the last message.
+   * @param {WebSocket} webSocket
+   * @param {ArrayBuffer|string} message
+   */
+  async webSocketMessage(webSocket, message) {
+    const { docName, auth, authActions } = webSocket.deserializeAttachment();
     // eslint-disable-next-line no-param-reassign
     webSocket.auth = auth;
-
     if (!authActions.split(',').includes('write')) {
       // eslint-disable-next-line no-param-reassign
       webSocket.readOnly = true;
     }
-    // eslint-disable-next-line no-console
-    console.log(`[docroom] Setting up WSConnection for ${docName} with auth(${webSocket.auth
-      ? webSocket.auth.substring(0, webSocket.auth.indexOf(' ')) : 'none'})`);
+    await handleWebSocketMessage(webSocket, docName, this.env, this.storage, message);
+  }
 
-    const timingData = await setupWSConnection(webSocket, docName, this.env, this.storage);
-    return timingData;
+  /**
+   * CF Hibernation API: called when a hibernated WebSocket closes.
+   * @param {WebSocket} webSocket
+   */
+  // eslint-disable-next-line class-methods-use-this
+  webSocketClose(webSocket) {
+    const { docName } = webSocket.deserializeAttachment();
+    handleWebSocketClose(webSocket, docName);
+  }
+
+  /**
+   * CF Hibernation API: called when a hibernated WebSocket encounters an error.
+   * @param {WebSocket} webSocket
+   * @param {Error} error
+   */
+  // eslint-disable-next-line class-methods-use-this
+  webSocketError(webSocket, error) {
+    logError(error, '[docroom] WebSocket error', error);
+    const { docName } = webSocket.deserializeAttachment();
+    handleWebSocketClose(webSocket, docName);
   }
 }

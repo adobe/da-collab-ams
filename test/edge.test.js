@@ -689,7 +689,7 @@ describe('Worker test suite', () => {
     const headers = new Map();
     headers.set('myheader', 'myval');
     const req = {
-      url: 'http://do.re.mi/https://admin.da.live/laaa.html?Authorization=qrtoefi',
+      url: 'http://do.re.mi/https://admin.entmseds-da.live/laaa.html?Authorization=qrtoefi',
       headers,
     };
 
@@ -713,37 +713,37 @@ describe('Worker test suite', () => {
 
     const rooms = {
       idFromName(nm) { return `id${hash(nm)}`; },
-      get(id) { return id === 'id1255893316' ? myRoom : null; },
+      get(id) { return id === 'id-351352426' ? myRoom : null; },
     };
-    const env = { rooms, daadmin: serviceBinding, ADMIN_ORIGIN: 'https://admin.da.live' };
+    const env = { rooms, daadmin: serviceBinding, ADMIN_ORIGIN: 'https://admin.entmseds-da.live' };
 
     const res = await handleApiRequest(req, env);
     assert.equal(306, res.status);
 
     assert.equal(1, mockFetchCalled.length);
     const mfreq = mockFetchCalled[0];
-    assert.equal('https://admin.da.live/laaa.html', mfreq.url);
+    assert.equal('https://admin.entmseds-da.live/laaa.html', mfreq.url);
     assert.equal('HEAD', mfreq.opts.method);
 
     assert.equal(1, roomFetchCalled.length);
 
     const rfreq = roomFetchCalled[0];
-    assert.equal('https://admin.da.live/laaa.html', rfreq.url);
+    assert.equal('https://admin.entmseds-da.live/laaa.html', rfreq.url);
     assert.equal('qrtoefi', rfreq.headers.get('Authorization'));
     assert.equal('myval', rfreq.headers.get('myheader'));
-    assert.equal('https://admin.da.live/laaa.html', rfreq.headers.get('X-collab-room'));
+    assert.equal('https://admin.entmseds-da.live/laaa.html', rfreq.headers.get('X-collab-room'));
   });
 
   it('Test handleApiRequest via Service Binding (param auth)', async () => {
     const req = {
-      url: 'http://do.re.mi/https://admin.da.live/laaa.html?Authorization=lala',
+      url: 'http://do.re.mi/https://admin.entmseds-da.live/laaa.html?Authorization=lala',
       headers: new Headers(),
     };
 
     // eslint-disable-next-line consistent-return
     const mockFetch = async (url, opts) => {
       if (opts.method === 'HEAD'
-        && url === 'https://admin.da.live/laaa.html'
+        && url === 'https://admin.entmseds-da.live/laaa.html'
         && opts.headers.get('Authorization') === 'lala') {
         return new Response(null, { status: 410 });
       }
@@ -752,7 +752,7 @@ describe('Worker test suite', () => {
     // This is how a service binding is exposed to the program, via env
     const env = {
       daadmin: { fetch: mockFetch },
-      ADMIN_ORIGIN: 'https://admin.da.live',
+      ADMIN_ORIGIN: 'https://admin.entmseds-da.live',
     };
 
     const res = await handleApiRequest(req, env);
@@ -761,7 +761,7 @@ describe('Worker test suite', () => {
 
   it('Test handleApiRequest via Service Binding (header auth)', async () => {
     const req = {
-      url: 'http://do.re.mi/https://admin.da.live/laaa.html',
+      url: 'http://do.re.mi/https://admin.entmseds-da.live/laaa.html',
       headers: new Headers({
         'sec-websocket-protocol': 'yjs,test-token',
       }),
@@ -793,7 +793,7 @@ describe('Worker test suite', () => {
     const env = {
       daadmin: { fetch: mockDaAdminFetch },
       rooms,
-      ADMIN_ORIGIN: 'https://admin.da.live',
+      ADMIN_ORIGIN: 'https://admin.entmseds-da.live',
     };
 
     const res = await handleApiRequest(req, env);
@@ -816,13 +816,13 @@ describe('Worker test suite', () => {
 
   it('Test handleApiRequest document not found (404)', async () => {
     const req = {
-      url: 'http://do.re.mi/https://admin.da.live/nonexistent.html',
+      url: 'http://do.re.mi/https://admin.entmseds-da.live/nonexistent.html',
       headers: new Headers(),
     };
 
     const mockFetch = async (url, opts) => new Response(null, { status: 404 });
     const daadmin = { fetch: mockFetch };
-    const env = { daadmin, ADMIN_ORIGIN: 'https://admin.da.live' };
+    const env = { daadmin, ADMIN_ORIGIN: 'https://admin.entmseds-da.live' };
 
     const res = await handleApiRequest(req, env);
     assert.equal(404, res.status);
@@ -831,13 +831,13 @@ describe('Worker test suite', () => {
 
   it('Test handleApiRequest not authorized (non-WS)', async () => {
     const req = {
-      url: 'http://do.re.mi/https://admin.da.live/hihi.html',
+      url: 'http://do.re.mi/https://admin.entmseds-da.live/hihi.html',
       headers: new Headers(),
     };
 
     const mockFetch = async (url, opts) => new Response(null, { status: 401 });
     const daadmin = { fetch: mockFetch };
-    const env = { daadmin, ADMIN_ORIGIN: 'https://admin.da.live' };
+    const env = { daadmin, ADMIN_ORIGIN: 'https://admin.entmseds-da.live' };
 
     const res = await handleApiRequest(req, env);
     assert.equal(401, res.status);
@@ -845,10 +845,13 @@ describe('Worker test suite', () => {
 
   async function testWsUpgradeAuthFailure(httpStatus, expectedCode, expectedReason, protocol) {
     const req = {
-      url: 'http://do.re.mi/https://admin.da.live/hihi.html',
+      url: 'http://do.re.mi/https://admin.entmseds-da.live/hihi.html',
       headers: new Headers({ Upgrade: 'websocket', 'sec-websocket-protocol': protocol }),
     };
-    const env = { daadmin: { fetch: async () => new Response(null, { status: httpStatus }) } };
+    const env = {
+      daadmin: { fetch: async () => new Response(null, { status: httpStatus }) },
+      ADMIN_ORIGIN: 'https://admin.entmseds-da.live',
+    };
 
     const ops = [];
     let triggerMessage;
@@ -930,7 +933,7 @@ describe('Worker test suite', () => {
 
   it('Test handleApiRequest da-admin fetch exception', async () => {
     const req = {
-      url: 'http://do.re.mi/https://admin.da.live/test.html',
+      url: 'http://do.re.mi/https://admin.entmseds-da.live/test.html',
       headers: new Headers(),
     };
 
@@ -939,7 +942,7 @@ describe('Worker test suite', () => {
       throw new Error('Network error');
     };
     const daadmin = { fetch: mockFetch };
-    const env = { daadmin, ADMIN_ORIGIN: 'https://admin.da.live' };
+    const env = { daadmin, ADMIN_ORIGIN: 'https://admin.entmseds-da.live' };
 
     const res = await handleApiRequest(req, env);
     assert.equal(500, res.status);
@@ -948,7 +951,7 @@ describe('Worker test suite', () => {
 
   it('Test handleApiRequest room object fetch exception', async () => {
     const req = {
-      url: 'http://do.re.mi/https://admin.da.live/test.html',
+      url: 'http://do.re.mi/https://admin.entmseds-da.live/test.html',
       headers: new Headers(),
     };
 
@@ -977,7 +980,7 @@ describe('Worker test suite', () => {
     const env = {
       daadmin: { fetch: mockDaAdminFetch },
       rooms,
-      ADMIN_ORIGIN: 'https://admin.da.live',
+      ADMIN_ORIGIN: 'https://admin.entmseds-da.live',
     };
 
     const res = await handleApiRequest(req, env);
@@ -1224,11 +1227,11 @@ describe('Worker test suite', () => {
   // Backend resolution (api-live-switch branch)
   //
   // The backend is derived from the doc URL alone — there is no X-is-helix
-  // header or isHelix attachment field. api.ent-aem.live docs are reached via the
+  // header or isHelix attachment field. api.entmseds.live docs are reached via the
   // global fetch; everything else via the da-admin service binding.
   // ---------------------------------------------------------------------------
 
-  it('Test handleApiRequest routes an api.ent-aem.live HEAD through the global fetch', async () => {
+  it('Test handleApiRequest routes an api.entmseds.live HEAD through the global fetch', async () => {
     const savedFetch = globalThis.fetch;
     const helixCalls = [];
     globalThis.fetch = async (url, opts) => {
@@ -1258,7 +1261,7 @@ describe('Worker test suite', () => {
 
     try {
       const req = {
-        url: 'http://do.re.mi/https://api.ent-aem.live/o/r/p.html',
+        url: 'http://do.re.mi/https://api.entmseds.live/o/r/p.html',
         headers: new Headers(),
       };
       const res = await handleApiRequest(req, env);
@@ -1266,12 +1269,12 @@ describe('Worker test suite', () => {
 
       assert.equal(1, helixCalls.length, 'the global fetch must be used for the Helix HEAD');
       assert.equal('HEAD', helixCalls[0].opts.method);
-      assert.equal('https://api.ent-aem.live/o/r/p.html', helixCalls[0].url);
+      assert.equal('https://api.entmseds.live/o/r/p.html', helixCalls[0].url);
       assert.equal(0, daadminCalls.length, 'daadmin.fetch must NOT be called for Helix docs');
 
       assert.equal(1, roomFetchCalls.length);
       assert.equal(
-        'https://api.ent-aem.live/o/r/p.html',
+        'https://api.entmseds.live/o/r/p.html',
         roomFetchCalls[0].headers.get('X-collab-room'),
       );
       assert.equal(
@@ -1304,11 +1307,11 @@ describe('Worker test suite', () => {
       idFromName(nm) { return `id${hash(nm)}`; },
       get() { return myRoom; },
     };
-    const env = { rooms, daadmin };
+    const env = { rooms, daadmin, ADMIN_ORIGIN: 'https://admin.entmseds-da.live' };
 
     try {
       const req = {
-        url: 'http://do.re.mi/https://admin.da.live/some.html',
+        url: 'http://do.re.mi/https://admin.entmseds-da.live/some.html',
         headers: new Headers(),
       };
       const res = await handleApiRequest(req, env);
@@ -1320,16 +1323,16 @@ describe('Worker test suite', () => {
     }
   });
 
-  it('Test handleApiRequest still rejects api.ent-aem.* hosts that are not api.ent-aem.live', async () => {
+  it('Test handleApiRequest still rejects api.entmseds.* hosts that are not api.entmseds.live', async () => {
     const req = {
-      url: 'http://do.re.mi/https://api.ent-aem.fake/laaa.html',
+      url: 'http://do.re.mi/https://api.entmseds.fake/laaa.html',
       headers: new Headers(),
     };
     const res = await handleApiRequest(req, { daadmin: {} });
-    assert.equal(404, res.status, 'Only api.ent-aem.live (with trailing slash) is whitelisted');
+    assert.equal(404, res.status, 'Only api.entmseds.live (with trailing slash) is whitelisted');
   });
 
-  it('Test DocRoom fetch forces read,write authActions for an api.ent-aem.live doc', async () => {
+  it('Test DocRoom fetch forces read,write authActions for an api.entmseds.live doc', async () => {
     const savedNWSP = DocRoom.newWebSocketPair;
     const savedBS = persistence.bindState;
 
@@ -1347,7 +1350,7 @@ describe('Worker test suite', () => {
       const headers = new Headers({
         Upgrade: 'websocket',
         Authorization: 'au-helix',
-        'X-collab-room': 'https://api.ent-aem.live/o/r/p.html',
+        'X-collab-room': 'https://api.entmseds.live/o/r/p.html',
         // Empty X-auth-actions would normally mark the conn read-only; for a
         // Helix doc the backend's read,write default must override it.
         'X-auth-actions': '',
@@ -1357,7 +1360,7 @@ describe('Worker test suite', () => {
 
       assert.equal(306, resp.status);
       assert.equal(1, attachCalled.length);
-      assert.equal('https://api.ent-aem.live/o/r/p.html', attachCalled[0].docName);
+      assert.equal('https://api.entmseds.live/o/r/p.html', attachCalled[0].docName);
       assert.equal('au-helix', attachCalled[0].auth);
       assert.equal(
         'read,write',
@@ -1393,7 +1396,7 @@ describe('Worker test suite', () => {
       const dr = new DocRoom(makeCtx(null), { daadmin: {} });
       const headers = new Headers({
         Upgrade: 'websocket',
-        'X-collab-room': 'https://admin.da.live/foo.html',
+        'X-collab-room': 'https://admin.entmseds-da.live/foo.html',
         'X-auth-actions': 'read',
       });
       const req = { headers, url: 'http://localhost:4711/' };
@@ -1407,7 +1410,7 @@ describe('Worker test suite', () => {
     }
   });
 
-  it('Test DocRoom routes an api.aem.live doc to bindState (Helix backend derived from URL)', async () => {
+  it('Test DocRoom routes an api.entmseds.live doc to bindState (Helix backend derived from URL)', async () => {
     const savedNWSP = DocRoom.newWebSocketPair;
     const savedBS = persistence.bindState;
 
@@ -1425,7 +1428,7 @@ describe('Worker test suite', () => {
       const dr = new DocRoom(makeCtx(null), { daadmin });
       const headers = new Headers({
         Upgrade: 'websocket',
-        'X-collab-room': 'https://api.ent-aem.live/x.html',
+        'X-collab-room': 'https://api.entmseds.live/x.html',
       });
       const req = { headers, url: 'http://localhost:4711/' };
       const resp = await dr.fetch(req, {}, 306);
@@ -1435,7 +1438,7 @@ describe('Worker test suite', () => {
       await sleep(10);
 
       assert.equal(1, bindCalled.length);
-      assert.equal('https://api.ent-aem.live/x.html', bindCalled[0].nm);
+      assert.equal('https://api.entmseds.live/x.html', bindCalled[0].nm);
     } finally {
       DocRoom.newWebSocketPair = savedNWSP;
       persistence.bindState = savedBS;
@@ -1451,7 +1454,7 @@ describe('Worker test suite', () => {
         return new Map();
       };
 
-      const docName = 'https://api.ent-aem.live/cold-helix.html';
+      const docName = 'https://api.entmseds.live/cold-helix.html';
       const mockConn = {
         auth: undefined,
         readOnly: undefined,

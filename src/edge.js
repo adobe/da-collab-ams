@@ -210,9 +210,9 @@ export async function handleApiRequest(request, env) {
 
   // Make sure we only work with the configured admin origin or localhost
   if (!docName.startsWith(`${adminOrigin}/`)
-      && !docName.startsWith('https://admin.ent-da.page/')
-      && !docName.startsWith('https://stage-admin.ent-da.live/')
-      && !docName.startsWith('https://api.ent-aem.live/')
+      && !docName.startsWith('https://admin.entmseds-da.page/')
+      && !docName.startsWith('https://stage-admin.entmseds-da.live/')
+      && !docName.startsWith('https://api.entmseds.live/')
       && !docName.startsWith('http://localhost:')) {
     return new Response('unable to get resource', { status: 404 });
   }

@@ -23,15 +23,14 @@ const wsReadyStateConnecting = 0;
 const wsReadyStateOpen = 1;
 
 /**
- * True for documents that live in Helix (api.ent-aem.live) rather than da-admin.
  * @param {string} docName - the document URL
  */
-export const isHelixDoc = (docName) => docName.startsWith('https://api.ent-aem.live/');
+export const isHelixDoc = (docName) => docName.startsWith('https://api.entmseds.live/');
 
 /**
  * Resolve the content backend for a document.
  *
- * Documents under https://api.ent-aem.live live in Helix and are reached over the
+ * Documents under https://api.entmseds.live live in Helix and are reached over the
  * public internet (the global fetch); everything else is read and written
  * through the da-admin service binding.
  *

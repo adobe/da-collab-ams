@@ -494,7 +494,7 @@ describe('Collab Test Suite', () => {
       },
     });
 
-    const docName = 'https://admin.da.live/source/reentrant.html';
+    const docName = 'https://admin.entmseds-da.live/source/reentrant.html';
     const storage = { list: async () => new Map() };
     const ydoc = new pss.WSSharedDoc(docName);
     pss.setYDoc(docName, ydoc);
@@ -614,7 +614,7 @@ describe('Collab Test Suite', () => {
   });
 
   it('Test persistence update closes all and cleans storage on 412', async () => {
-    const docName = 'https://admin.da.live/source/foo.html';
+    const docName = 'https://admin.entmseds-da.live/source/foo.html';
     const ydoc = new WSSharedDoc(docName);
 
     const storageDeleteAllCalled = [];
@@ -657,7 +657,7 @@ describe('Collab Test Suite', () => {
   });
 
   it('Test 412 cleanup allows fresh connection attempt', async () => {
-    const docName = 'https://admin.da.live/source/bar.html';
+    const docName = 'https://admin.entmseds-da.live/source/bar.html';
 
     // First connection and 412 scenario
     const ydoc = new WSSharedDoc(docName);
@@ -691,7 +691,7 @@ describe('Collab Test Suite', () => {
   });
 
   it('Test ydoc error map is set on 412', async () => {
-    const docName = 'https://admin.da.live/source/baz.html';
+    const docName = 'https://admin.entmseds-da.live/source/baz.html';
     const ydoc = new WSSharedDoc(docName);
     ydoc.storage = { deleteAll: async () => {} };
 
@@ -731,7 +731,7 @@ describe('Collab Test Suite', () => {
       },
     });
 
-    const docName = 'https://admin.da.live/source/qux.html';
+    const docName = 'https://admin.entmseds-da.live/source/qux.html';
     const ydoc = new pss.WSSharedDoc(docName);
     ydoc.storage = { deleteAll: async () => {} };
 
@@ -802,7 +802,7 @@ describe('Collab Test Suite', () => {
   });
 
   it('Test 412 closes all clients including readonly', async () => {
-    const docName = 'https://admin.da.live/source/multi.html';
+    const docName = 'https://admin.entmseds-da.live/source/multi.html';
     const ydoc = new WSSharedDoc(docName);
     ydoc.storage = { deleteAll: async () => {} };
 
@@ -975,7 +975,7 @@ describe('Collab Test Suite', () => {
       },
     });
 
-    const docName = 'https://admin.da.live/source/flush-noop.html';
+    const docName = 'https://admin.entmseds-da.live/source/flush-noop.html';
     const storage = { list: async () => new Map() };
     const ydoc = new pss.WSSharedDoc(docName);
     pss.setYDoc(docName, ydoc);
@@ -1016,7 +1016,7 @@ describe('Collab Test Suite', () => {
       },
     });
 
-    const docName = 'https://admin.da.live/source/flush-saves.html';
+    const docName = 'https://admin.entmseds-da.live/source/flush-saves.html';
     const storage = { list: async () => new Map() };
     const ydoc = new pss.WSSharedDoc(docName);
     pss.setYDoc(docName, ydoc);
@@ -1053,7 +1053,7 @@ describe('Collab Test Suite', () => {
       '../src/debounce.js': { default: mockdebounce },
     });
 
-    const docName = 'https://admin.da.live/source/flush-cancel.html';
+    const docName = 'https://admin.entmseds-da.live/source/flush-cancel.html';
     const storage = { list: async () => new Map() };
     const ydoc = new pss.WSSharedDoc(docName);
     pss.setYDoc(docName, ydoc);
@@ -1090,7 +1090,7 @@ describe('Collab Test Suite', () => {
       },
     });
 
-    const docName = 'https://admin.da.live/source/flush-inflight.html';
+    const docName = 'https://admin.entmseds-da.live/source/flush-inflight.html';
     const storage = { list: async () => new Map() };
     const ydoc = new pss.WSSharedDoc(docName);
     pss.setYDoc(docName, ydoc);
@@ -1358,7 +1358,7 @@ describe('Collab Test Suite', () => {
   });
 
   it('Test bindstate read from worker storage for doc', async () => {
-    const docName = 'https://admin.da.live/source/foo/bar.html';
+    const docName = 'https://admin.entmseds-da.live/source/foo/bar.html';
 
     // Prepare the (mocked) storage
     const testDoc = new Y.Doc();
@@ -1397,7 +1397,7 @@ describe('Collab Test Suite', () => {
   });
 
   it('Test bindstate read from worker storage for json', async () => {
-    const docName = 'https://admin.da.live/source/foo/bar.json';
+    const docName = 'https://admin.entmseds-da.live/source/foo/bar.json';
 
     // Prepare the (mocked) storage: empty ydoc (no sheets data) so doc2json(ydoc) === '{}'
     const testDoc = new Y.Doc();
@@ -1428,7 +1428,7 @@ describe('Collab Test Suite', () => {
   });
 
   it('Test bindstate falls back to daadmin on worker storage error', async () => {
-    const docName = 'https://admin.da.live/source/foo/bar.html';
+    const docName = 'https://admin.entmseds-da.live/source/foo/bar.html';
     const ydoc = new Y.Doc();
     setYDoc(docName, ydoc);
 
@@ -1470,7 +1470,7 @@ describe('Collab Test Suite', () => {
       },
     });
 
-    const docName = 'https://admin.da.live/source/foo/bar.html';
+    const docName = 'https://admin.entmseds-da.live/source/foo/bar.html';
     const storage = { list: async () => new Map() };
     const updObservers = [];
     const ydoc = new Y.Doc();
@@ -1531,7 +1531,7 @@ describe('Collab Test Suite', () => {
       },
     });
 
-    const docName = 'https://admin.da.live/source/foo/bar.html';
+    const docName = 'https://admin.entmseds-da.live/source/foo/bar.html';
     const storage = { list: async () => new Map() };
     const updObservers = [];
     const ydoc = new Y.Doc();
@@ -1586,7 +1586,7 @@ describe('Collab Test Suite', () => {
   });
 
   it('test persist state in worker storage on update', async () => {
-    const docName = 'https://admin.da.live/source/foo/bar.html';
+    const docName = 'https://admin.entmseds-da.live/source/foo/bar.html';
 
     const updObservers = [];
     const ydoc = new Y.Doc();
@@ -2273,7 +2273,7 @@ describe('Collab Test Suite', () => {
   });
 
   it('test no empty document if daadmin fetch crashes', async () => {
-    const docName = 'https://admin.da.live/source/foo/bar.html';
+    const docName = 'https://admin.entmseds-da.live/source/foo/bar.html';
 
     const updObservers = [];
     const ydoc = new Y.Doc();
@@ -2347,7 +2347,7 @@ describe('Collab Test Suite', () => {
   });
 
   it('Test bindstate restores from CF storage when ahead of da-admin (pending unsaved changes)', async () => {
-    const docName = 'https://admin.da.live/source/foo/bar.html';
+    const docName = 'https://admin.entmseds-da.live/source/foo/bar.html';
 
     const daAdminContent = '<body>\n  <header></header>\n  <main><div><p>original</p></div></main>\n  <footer></footer>\n</body>\n';
 
@@ -2393,7 +2393,7 @@ describe('Collab Test Suite', () => {
   });
 
   it('bindState writes lastsync after initial da-admin restore so a later DO reset can recover pending changes', async () => {
-    const docName = 'https://admin.da.live/source/foo/bar.html';
+    const docName = 'https://admin.entmseds-da.live/source/foo/bar.html';
     const daAdminContent = '<body>\n  <header></header>\n  <main><div><p>synced</p></div></main>\n  <footer></footer>\n</body>\n';
 
     const ydoc = new Y.Doc();
@@ -2585,7 +2585,7 @@ describe('Collab Test Suite', () => {
       },
     });
 
-    const docName = 'https://admin.da.live/source/skip-save.html';
+    const docName = 'https://admin.entmseds-da.live/source/skip-save.html';
     const storage = { list: async () => new Map() };
     const updObservers = [];
     const ydoc = new pss.WSSharedDoc(docName);
@@ -2633,7 +2633,7 @@ describe('Collab Test Suite', () => {
   // Backend resolution (api-live-switch branch)
   //
   // The storage backend is determined entirely by the doc URL: docs under
-  // https://api.ent-aem.live live in Helix (global fetch); everything else goes
+  // https://api.entmseds.live live in Helix (global fetch); everything else goes
   // through the da-admin service binding. There is no isHelix flag to thread.
   // ---------------------------------------------------------------------------
 
@@ -2645,15 +2645,15 @@ describe('Collab Test Suite', () => {
         return 'da-resp';
       },
     };
-    const backend = getBackend('https://admin.da.live/x.html', daadmin);
-    const resp = await backend.fetch('https://admin.da.live/x.html', { method: 'HEAD' });
+    const backend = getBackend('https://admin.entmseds-da.live/x.html', daadmin);
+    const resp = await backend.fetch('https://admin.entmseds-da.live/x.html', { method: 'HEAD' });
 
     assert.equal('da-resp', resp);
     assert.equal(1, calls.length);
-    assert.equal('https://admin.da.live/x.html', calls[0].url);
+    assert.equal('https://admin.entmseds-da.live/x.html', calls[0].url);
   });
 
-  it('getBackend routes api.ent-aem.live docs through the global fetch', async () => {
+  it('getBackend routes api.entmseds.live docs through the global fetch', async () => {
     const savedFetch = globalThis.fetch;
     const calls = [];
     globalThis.fetch = async (url, opts) => {
@@ -2664,19 +2664,19 @@ describe('Collab Test Suite', () => {
       const daadmin = {
         fetch: async () => { assert.fail('daadmin.fetch must not be called for Helix docs'); },
       };
-      const backend = getBackend('https://api.ent-aem.live/o/r/p.html', daadmin);
-      const resp = await backend.fetch('https://api.ent-aem.live/o/r/p.html', { method: 'HEAD' });
+      const backend = getBackend('https://api.entmseds.live/o/r/p.html', daadmin);
+      const resp = await backend.fetch('https://api.entmseds.live/o/r/p.html', { method: 'HEAD' });
 
       assert.equal('helix-resp', resp);
       assert.equal(1, calls.length);
-      assert.equal('https://api.ent-aem.live/o/r/p.html', calls[0].url);
+      assert.equal('https://api.entmseds.live/o/r/p.html', calls[0].url);
     } finally {
       globalThis.fetch = savedFetch;
     }
   });
 
   it('getBackend.putReqData builds multipart form-data for da-admin docs', () => {
-    const backend = getBackend('https://admin.da.live/x.html', {});
+    const backend = getBackend('https://admin.entmseds-da.live/x.html', {});
     const { body, size, headers } = backend.putReqData('hello world', 'text/html');
 
     assert(body instanceof FormData, 'da-admin PUT body must be FormData');
@@ -2685,7 +2685,7 @@ describe('Collab Test Suite', () => {
   });
 
   it('getBackend.putReqData sends raw body + Content-Type for Helix docs', () => {
-    const backend = getBackend('https://api.ent-aem.live/o/r/p.html', {});
+    const backend = getBackend('https://api.entmseds.live/o/r/p.html', {});
     const { body, size, headers } = backend.putReqData('hello world', 'text/html');
 
     assert.strictEqual(body, 'hello world', 'Helix PUT body must be the raw content string');
@@ -2693,13 +2693,13 @@ describe('Collab Test Suite', () => {
     assert.deepStrictEqual(headers, { 'Content-Type': 'text/html' });
   });
 
-  it('isHelixDoc is true only for api.ent-aem.live doc URLs', () => {
-    assert.equal(isHelixDoc('https://api.ent-aem.live/o/r/p.html'), true);
-    assert.equal(isHelixDoc('https://admin.da.live/x.html'), false);
+  it('isHelixDoc is true only for api.entmseds.live doc URLs', () => {
+    assert.equal(isHelixDoc('https://api.entmseds.live/o/r/p.html'), true);
+    assert.equal(isHelixDoc('https://admin.entmseds-da.live/x.html'), false);
     assert.equal(isHelixDoc('http://localhost:8080/x.html'), false);
   });
 
-  it('persistence.get routes to the global fetch for an api.ent-aem.live doc', async () => {
+  it('persistence.get routes to the global fetch for an api.entmseds.live doc', async () => {
     const savedFetch = globalThis.fetch;
     const calls = [];
     globalThis.fetch = async (url, opts) => {
@@ -2713,13 +2713,13 @@ describe('Collab Test Suite', () => {
         fetch: async () => { assert.fail('daadmin.fetch must not be called for Helix docs'); },
       };
       const result = await persistence.get(
-        'https://api.ent-aem.live/owner/repo/page.html',
+        'https://api.entmseds.live/owner/repo/page.html',
         'Bearer t',
         daadmin,
       );
       assert.equal(result, 'helix content');
       assert.equal(1, calls.length);
-      assert.equal(calls[0].url, 'https://api.ent-aem.live/owner/repo/page.html');
+      assert.equal(calls[0].url, 'https://api.entmseds.live/owner/repo/page.html');
       assert.equal(calls[0].opts.headers.get('Authorization'), 'Bearer t');
     } finally {
       globalThis.fetch = savedFetch;
@@ -2737,7 +2737,7 @@ describe('Collab Test Suite', () => {
       const conns = new Map();
       conns.set({ auth: 'Bearer abc' }, new Set());
       const ydoc = {
-        name: 'https://api.ent-aem.live/owner/repo/page.html',
+        name: 'https://api.entmseds.live/owner/repo/page.html',
         conns,
         daadmin: {
           fetch: async () => { assert.fail('daadmin.fetch must not be called for Helix docs'); },
@@ -2749,7 +2749,7 @@ describe('Collab Test Suite', () => {
       assert(result.ok);
       assert.equal(1, calls.length);
       const { url, opts } = calls[0];
-      assert.equal(url, 'https://api.ent-aem.live/owner/repo/page.html');
+      assert.equal(url, 'https://api.entmseds.live/owner/repo/page.html');
       assert.equal(opts.method, 'PUT');
       assert.strictEqual(opts.body, body, 'Helix PUT body must be the raw content string, not FormData');
       assert.equal(opts.headers.get('Content-Type'), 'text/html');
@@ -2772,7 +2772,7 @@ describe('Collab Test Suite', () => {
       const conns = new Map();
       conns.set({ auth: 'a' }, new Set());
       const ydoc = {
-        name: 'https://api.ent-aem.live/o/r/d.json',
+        name: 'https://api.entmseds.live/o/r/d.json',
         conns,
         daadmin: {},
       };
@@ -2795,7 +2795,7 @@ describe('Collab Test Suite', () => {
     };
     const conns = new Map();
     conns.set({ auth: 'a' }, new Set());
-    const ydoc = { name: 'https://admin.da.live/source/x.html', conns, daadmin };
+    const ydoc = { name: 'https://admin.entmseds-da.live/source/x.html', conns, daadmin };
     const body = 'plain html content larger than empty stub padding padding padding padding padding padding';
     await persistence.put(ydoc, body);
 
@@ -2825,7 +2825,7 @@ describe('Collab Test Suite', () => {
     };
     persistence.update = async () => {};
     try {
-      const docName = 'https://api.ent-aem.live/o/r/bindstate.html';
+      const docName = 'https://api.entmseds.live/o/r/bindstate.html';
       const ydoc = new Y.Doc();
       ydoc.daadmin = {
         fetch: async () => { assert.fail('daadmin.fetch must not be called for Helix docs'); },

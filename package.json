@@ -14,7 +14,7 @@
     "deploy:ent-aem": "node prepare-deploy.js && wrangler deploy -e ent-aem -c wrangler-versioned.toml",
     "deploy:eds-eu": "node prepare-deploy.js && wrangler deploy -e eds-eu -c wrangler-versioned.toml",
     "deploy:eds-ca": "node prepare-deploy.js && wrangler deploy -e eds-ca -c wrangler-versioned.toml",
-    "test": "c8 mocha --import ./test/stubs/register.mjs --inline-diffs --exit # --exit is needed because some test code triggers async listeners",
+    "test": "c8 mocha --node-option import=./test/stubs/register.mjs --inline-diffs --exit # --exit is needed because some test code triggers async listeners",
     "test:it": "echo 'todo'",
     "test:postdeploy": "echo 'todo'",
     "prepare": "husky",

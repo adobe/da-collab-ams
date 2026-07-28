@@ -23,6 +23,7 @@ function makeCtx(storage = null) {
     storage,
     accepted,
     acceptWebSocket(ws) { accepted.push(ws); },
+    waitUntil(p) { return p; },
   };
 }
 
@@ -299,6 +300,53 @@ describe('Worker test suite', () => {
     const resp = await dr.fetch(req);
 
     assert.equal(400, resp.status);
+  });
+
+  it('Docroom clearStorage deletes all CF storage and closes connections', async () => {
+    const ydocName = 'http://foobar.com/clearstorage-test.html';
+    const testYdoc = new WSSharedDoc(ydocName);
+    const m = setYDoc(ydocName, testYdoc);
+
+    const connClosed = [];
+    const mockConn = { close() { connClosed.push('close'); } }; // eslint-disable-line max-statements-per-line
+    testYdoc.conns.set(mockConn, 1234);
+
+    const deleteCalled = [];
+    const mockStorage = {
+      async deleteAll() { deleteCalled.push(true); },
+    };
+
+    const req = { url: `${ydocName}?api=clearStorage` };
+    const dr = new DocRoom({ storage: mockStorage });
+
+    assert(m.has(ydocName), 'Precondition: doc must be registered');
+    const resp = await dr.fetch(req);
+    assert.equal(200, resp.status);
+    assert.deepStrictEqual(deleteCalled, [true], 'storage.deleteAll() must be called');
+    assert(!m.has(ydocName), 'Doc should have been removed from docs map');
+    assert.deepStrictEqual(connClosed, ['close'], 'Active connections should be closed');
+    testYdoc.destroy();
+  });
+
+  it('Docroom clearStorage without active doc still clears storage', async () => {
+    const deleteCalled = [];
+    const mockStorage = {
+      async deleteAll() { deleteCalled.push(true); },
+    };
+    const dr = new DocRoom({ storage: mockStorage });
+
+    const req = { url: 'http://foobar.com/no-doc.html?api=clearStorage' };
+    const resp = await dr.fetch(req);
+
+    assert.equal(200, resp.status, 'clearStorage returns 200 even when doc is not in memory');
+    assert.deepStrictEqual(deleteCalled, [true], 'storage.deleteAll() must still be called');
+  });
+
+  it('Docroom clearStorage with no storage context still returns 200', async () => {
+    const dr = new DocRoom({});
+    const req = { url: 'http://foobar.com/no-storage.html?api=clearStorage' };
+    const resp = await dr.fetch(req);
+    assert.equal(200, resp.status);
   });
 
   it('Test DocRoom fetch', async () => {
@@ -1150,7 +1198,7 @@ describe('Worker test suite', () => {
     const m = setYDoc(docName, testYdoc);
 
     const dr = new DocRoom(makeCtx(null), {});
-    dr.webSocketClose(mockConn, 1000, 'Normal', true);
+    await dr.webSocketClose(mockConn, 1000, 'Normal', true);
 
     assert.deepStrictEqual(['close'], closeCalled);
     assert(!m.has(docName), 'Doc should be removed when no connections remain');
@@ -1173,7 +1221,7 @@ describe('Worker test suite', () => {
     const m = setYDoc(docName, testYdoc);
 
     const dr = new DocRoom(makeCtx(null), {});
-    dr.webSocketError(mockConn, new Error('connection reset'));
+    await dr.webSocketError(mockConn, new Error('connection reset'));
 
     assert.deepStrictEqual(['close'], closeCalled);
     assert(!m.has(docName), 'Doc should be removed on error');
@@ -1190,7 +1238,7 @@ describe('Worker test suite', () => {
     };
 
     const dr = new DocRoom(makeCtx(null), {});
-    dr.webSocketClose(mockConn, 1000, 'Normal', true);
+    await dr.webSocketClose(mockConn, 1000, 'Normal', true);
     // No assertion needed — test passes if close() is not called
   });
 
@@ -1443,6 +1491,63 @@ describe('Worker test suite', () => {
       DocRoom.newWebSocketPair = savedNWSP;
       persistence.bindState = savedBS;
     }
+  });
+
+  async function testInitSessionLogLevel(status, expectedLevel) {
+    const savedNWSP = DocRoom.newWebSocketPair;
+    const savedBS = persistence.bindState;
+    try {
+      persistence.bindState = async () => {
+        const err = new Error(`unable to get resource - status: ${status}`);
+        err.status = status;
+        throw err;
+      };
+      const wsp1 = { serializeAttachment() {}, close() {}, auth: undefined };
+      DocRoom.newWebSocketPair = () => [{}, wsp1];
+
+      const dr = new DocRoom(makeCtx(null), { daadmin: { mark: 'da' } });
+      const headers = new Headers({
+        Upgrade: 'websocket',
+        Authorization: 'au123',
+        'X-collab-room': 'http://foo.bar/sendto/doc.html',
+      });
+      const req = { headers, url: 'http://localhost:4711/' };
+
+      const logged = [];
+      const origWarn = console.warn;
+      const origLog = console.log;
+      const origError = console.error;
+      console.warn = (...a) => logged.push(['warn', ...a]);
+      console.log = (...a) => logged.push(['log', ...a]);
+      console.error = (...a) => logged.push(['error', ...a]);
+      try {
+        await dr.fetch(req, {}, 306);
+        await sleep(20);
+      } finally {
+        console.warn = origWarn;
+        console.log = origLog;
+        console.error = origError;
+      }
+
+      const entry = logged.find(([, msg]) => typeof msg === 'string' && msg.includes('Error during session setup'));
+      assert(entry, `Expected '[docroom] Error during session setup' log entry for status ${status}`);
+      assert.equal(entry[0], expectedLevel, `Expected '${expectedLevel}' for status ${status}, got '${entry[0]}'`);
+    } finally {
+      DocRoom.newWebSocketPair = savedNWSP;
+      persistence.bindState = savedBS;
+    }
+  }
+
+  it('Test DocRoom initSession logs console.warn on 401 (auth outcome is operational noise)', async () => {
+    await testInitSessionLogLevel(401, 'warn');
+  });
+
+  it('Test DocRoom initSession logs console.log on 403 (ACL denial is operational noise)', async () => {
+    await testInitSessionLogLevel(403, 'log');
+  });
+
+  it('Test DocRoom initSession logs console.error on other failures', async () => {
+    await testInitSessionLogLevel(500, 'error');
   });
 
   it('Test DocRoom webSocketMessage works with an attachment that has no isHelix field', async () => {

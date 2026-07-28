@@ -9,6 +9,8 @@
  * OF ANY KIND, either express or implied. See the License for the specific language
  * governing permissions and limitations under the License.
  */
+// eslint-disable-next-line import/no-unresolved
+import { DurableObject } from 'cloudflare:workers';
 import {
   getBackend, handleWebSocketClose, handleWebSocketMessage,
   invalidateFromAdmin, isHelixDoc, logError, setupWSConnection,
@@ -320,20 +322,7 @@ export default {
  *
  * @tpye {Fetcher}
  */
-export class DocRoom {
-  constructor(controller, env) {
-    // `controller.storage` provides access to our durable storage. It provides a simple KV
-    // get()/put() interface.
-    this.storage = controller?.storage;
-
-    // `env` is our environment bindings (discussed earlier).
-    this.env = env;
-    this.id = controller?.id?.toString() || `no-controller-${new Date().getTime()}`;
-
-    // `ctx` is the Durable Object controller, used for the Hibernation API
-    this.ctx = controller;
-  }
-
+export class DocRoom extends DurableObject {
   /**
    * Handle the API calls. Supported API calls right now are to sync the doc with the da-admin
    * state or to indicate that the document has been deleted from da-admin.
@@ -343,7 +332,7 @@ export class DocRoom {
    * @param {Request} request
    * @returns {Promise<*>}
    */
-  // eslint-disable-next-line class-methods-use-this,no-unused-vars
+  // eslint-disable-next-line no-unused-vars
   async handleApiCall(api, docName, request) {
     switch (api) {
       case 'deleteAdmin':
@@ -358,6 +347,16 @@ export class DocRoom {
         } else {
           return new Response('Not Found', { status: 404 });
         }
+      case 'clearStorage':
+        // Wipe all CF DO storage for this document (ydoc state + lastsync anchor).
+        // Required when the stored ydoc state is corrupted and causes doc2aem to hang,
+        // making bindState never complete. After clearing, the next connection will
+        // fall back to da-admin content via the !restored path in bindState.
+        if (this.ctx?.storage) {
+          await this.ctx.storage.deleteAll();
+        }
+        await invalidateFromAdmin(docName);
+        return new Response('OK', { status: 200 });
       default:
         return new Response('Invalid API', { status: 400 });
     }
@@ -433,7 +432,7 @@ export class DocRoom {
         auth ? auth.substring(0, auth.indexOf(' ')) : 'none'})`);
 
       // Kick off async document initialization; response is returned immediately.
-      this.initSession(server, docName);
+      this.ctx.waitUntil(this.initSession(server, docName));
 
       const reqHeaders = request.headers;
       const respheaders = new Headers({
@@ -462,9 +461,19 @@ export class DocRoom {
    */
   async initSession(webSocket, docName) {
     try {
-      await setupWSConnection(webSocket, docName, this.env, this.storage, true);
+      await setupWSConnection(webSocket, docName, this.env, this.ctx?.storage, this.ctx, true);
     } catch (err) {
-      logError(err, '[docroom] Error during session setup', docName, err);
+      // 401/403 from da-admin are auth/ACL outcomes the worker cannot bypass —
+      // operational noise, not service errors. Mirrors persistence.get/update.
+      if (err?.status === 401) {
+        // eslint-disable-next-line no-console
+        console.warn('[docroom] Error during session setup', docName, err.message);
+      } else if (err?.status === 403) {
+        // eslint-disable-next-line no-console
+        console.log('[docroom] Error during session setup', docName, err.message);
+      } else {
+        logError(err, '[docroom] Error during session setup', docName, err);
+      }
       try {
         webSocket.close(1011, err.message);
       } catch (_) { /* already closed */ }
@@ -485,7 +494,8 @@ export class DocRoom {
       // eslint-disable-next-line no-param-reassign
       webSocket.readOnly = true;
     }
-    await handleWebSocketMessage(webSocket, docName, this.env, this.storage, message);
+    // eslint-disable-next-line max-len
+    await handleWebSocketMessage(webSocket, docName, this.env, this.ctx?.storage, message, this.ctx);
   }
 
   /**
@@ -493,9 +503,9 @@ export class DocRoom {
    * @param {WebSocket} webSocket
    */
   // eslint-disable-next-line class-methods-use-this
-  webSocketClose(webSocket) {
+  async webSocketClose(webSocket) {
     const { docName } = webSocket.deserializeAttachment();
-    handleWebSocketClose(webSocket, docName);
+    await handleWebSocketClose(webSocket, docName);
   }
 
   /**
@@ -504,9 +514,9 @@ export class DocRoom {
    * @param {Error} error
    */
   // eslint-disable-next-line class-methods-use-this
-  webSocketError(webSocket, error) {
+  async webSocketError(webSocket, error) {
     logError(error, '[docroom] WebSocket error', error);
     const { docName } = webSocket.deserializeAttachment();
-    handleWebSocketClose(webSocket, docName);
+    await handleWebSocketClose(webSocket, docName);
   }
 }

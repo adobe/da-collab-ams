@@ -23,7 +23,8 @@ import {
   closeConn, getBackend, getYDoc, isHelixDoc,
   invalidateFromAdmin, isExpectedPlatformEvent, messageFlushRequest,
   messageFlushResponse, messageListener, persistence,
-  readState, setupWSConnection, setYDoc, showError, storeState, updateHandler, WSSharedDoc,
+  readState, safePutLastsync, setupWSConnection, setYDoc,
+  showError, storeState, updateHandler, WSSharedDoc,
 } from '../src/shareddoc.js';
 
 function isSubArray(full, sub) {
@@ -239,6 +240,44 @@ describe('Collab Test Suite', () => {
       assert.equal(403, error.status, 'Error must carry 403 status');
       assert(error.message.includes('403'));
     }
+  });
+
+  async function testGetLogLevel(status, statusText, expectedLevel) {
+    const daadmin = {
+      fetch: async () => ({ ok: false, status, statusText }),
+    };
+    const logged = [];
+    const origWarn = console.warn;
+    const origLog = console.log;
+    const origError = console.error;
+    console.warn = (...a) => logged.push(['warn', ...a]);
+    console.log = (...a) => logged.push(['log', ...a]);
+    console.error = (...a) => logged.push(['error', ...a]);
+    try {
+      await persistence.get('foo', 'auth', daadmin);
+      assert.fail('Should have thrown');
+    } catch (_) {
+      // expected
+    } finally {
+      console.warn = origWarn;
+      console.log = origLog;
+      console.error = origError;
+    }
+    const entry = logged.find(([, msg]) => typeof msg === 'string' && msg.includes('Unable to get resource from da-admin'));
+    assert(entry, `Expected a log entry for status ${status}`);
+    assert.equal(entry[0], expectedLevel, `Expected '${expectedLevel}' for status ${status}, got '${entry[0]}'`);
+  }
+
+  it('Test persistence get logs console.warn on 401', async () => {
+    await testGetLogLevel(401, 'Unauthorized', 'warn');
+  });
+
+  it('Test persistence get logs console.log on 403 (ACL denial is operational noise)', async () => {
+    await testGetLogLevel(403, 'Forbidden', 'log');
+  });
+
+  it('Test persistence get logs console.error on other failures', async () => {
+    await testGetLogLevel(500, 'Internal Server Error', 'error');
   });
 
   it('Test persistence put ok', async () => {
@@ -495,7 +534,7 @@ describe('Collab Test Suite', () => {
     });
 
     const docName = 'https://admin.entmseds-da.live/source/reentrant.html';
-    const storage = { list: async () => new Map() };
+    const storage = { list: async () => new Map(), get: async () => undefined };
     const ydoc = new pss.WSSharedDoc(docName);
     pss.setYDoc(docName, ydoc);
 
@@ -758,6 +797,7 @@ describe('Collab Test Suite', () => {
     // Set up bindState which registers update handlers
     const storage = {
       list: async () => new Map(),
+      get: async () => undefined,
       deleteAll: async () => {},
       put: async () => {},
     };
@@ -976,7 +1016,7 @@ describe('Collab Test Suite', () => {
     });
 
     const docName = 'https://admin.entmseds-da.live/source/flush-noop.html';
-    const storage = { list: async () => new Map() };
+    const storage = { list: async () => new Map(), get: async () => undefined };
     const ydoc = new pss.WSSharedDoc(docName);
     pss.setYDoc(docName, ydoc);
 
@@ -1017,7 +1057,7 @@ describe('Collab Test Suite', () => {
     });
 
     const docName = 'https://admin.entmseds-da.live/source/flush-saves.html';
-    const storage = { list: async () => new Map() };
+    const storage = { list: async () => new Map(), get: async () => undefined };
     const ydoc = new pss.WSSharedDoc(docName);
     pss.setYDoc(docName, ydoc);
 
@@ -1054,7 +1094,7 @@ describe('Collab Test Suite', () => {
     });
 
     const docName = 'https://admin.entmseds-da.live/source/flush-cancel.html';
-    const storage = { list: async () => new Map() };
+    const storage = { list: async () => new Map(), get: async () => undefined };
     const ydoc = new pss.WSSharedDoc(docName);
     pss.setYDoc(docName, ydoc);
 
@@ -1091,7 +1131,7 @@ describe('Collab Test Suite', () => {
     });
 
     const docName = 'https://admin.entmseds-da.live/source/flush-inflight.html';
-    const storage = { list: async () => new Map() };
+    const storage = { list: async () => new Map(), get: async () => undefined };
     const ydoc = new pss.WSSharedDoc(docName);
     pss.setYDoc(docName, ydoc);
 
@@ -1189,7 +1229,7 @@ describe('Collab Test Suite', () => {
     };
     pss.setYDoc(docName, testYDoc);
 
-    const mockStorage = { list: () => new Map() };
+    const mockStorage = { list: () => new Map(), get: async () => undefined };
 
     pss.persistence.get = async (nm, au, ad) => `Get: ${nm}-${au}-${ad}`;
     const updated = new Map();
@@ -1226,7 +1266,7 @@ describe('Collab Test Suite', () => {
     };
     pss.setYDoc(docName, testYDoc);
 
-    const mockStorage = { list: () => new Map() };
+    const mockStorage = { list: () => new Map(), get: async () => undefined };
 
     pss.persistence.get = async (nm, au, ad) => `Get: ${nm}-${au}-${ad}`;
     const updated = new Map();
@@ -1263,7 +1303,7 @@ describe('Collab Test Suite', () => {
     };
     pss.setYDoc(docName, testYDoc);
 
-    const mockStorage = { list: () => new Map() };
+    const mockStorage = { list: () => new Map(), get: async () => undefined };
     pss.persistence.get = async (nm, au, ad) => `Get: ${nm}-${au}-${ad}`;
     pss.persistence.update = async () => {};
 
@@ -1301,7 +1341,7 @@ describe('Collab Test Suite', () => {
     };
     pss.setYDoc(docName, testYDoc);
 
-    const mockStorage = { list: () => new Map() };
+    const mockStorage = { list: () => new Map(), get: async () => undefined };
     pss.persistence.get = async (nm, au, ad) => `Get: ${nm}-${au}-${ad}`;
     pss.persistence.update = async () => {};
 
@@ -1336,7 +1376,7 @@ describe('Collab Test Suite', () => {
     };
     pss.setYDoc(docName, testYDoc);
 
-    const mockStorage = { list: () => new Map() };
+    const mockStorage = { list: () => new Map(), get: async () => undefined };
     pss.persistence.get = async (nm, au, ad) => `Get: ${nm}-${au}-${ad}`;
     pss.persistence.update = async () => {};
 
@@ -1371,7 +1411,21 @@ describe('Collab Test Suite', () => {
     // Create a new YDoc which will be initialised from storage
     const ydoc = new Y.Doc();
     const conn = {};
-    const storage = { list: async () => stored };
+    const storage = {
+      list: async () => stored,
+      get: async (keyOrKeys) => {
+        if (Array.isArray(keyOrKeys)) {
+          const result = new Map();
+          keyOrKeys.forEach((k) => {
+            if (stored.has(k)) {
+              result.set(k, stored.get(k));
+            }
+          });
+          return result;
+        }
+        return stored.get(keyOrKeys);
+      },
+    };
 
     const savedGet = persistence.get;
     try {
@@ -1408,7 +1462,21 @@ describe('Collab Test Suite', () => {
 
     const ydoc = new Y.Doc();
     const conn = {};
-    const storage = { list: async () => stored };
+    const storage = {
+      list: async () => stored,
+      get: async (keyOrKeys) => {
+        if (Array.isArray(keyOrKeys)) {
+          const result = new Map();
+          keyOrKeys.forEach((k) => {
+            if (stored.has(k)) {
+              result.set(k, stored.get(k));
+            }
+          });
+          return result;
+        }
+        return stored.get(keyOrKeys);
+      },
+    };
 
     const savedGet = persistence.get;
     try {
@@ -1434,6 +1502,9 @@ describe('Collab Test Suite', () => {
 
     const storage = {
       list: async () => {
+        throw new Error('yikes');
+      },
+      get: async () => {
         throw new Error('yikes');
       },
     };
@@ -1471,7 +1542,7 @@ describe('Collab Test Suite', () => {
     });
 
     const docName = 'https://admin.entmseds-da.live/source/foo/bar.html';
-    const storage = { list: async () => new Map() };
+    const storage = { list: async () => new Map(), get: async () => undefined };
     const updObservers = [];
     const ydoc = new Y.Doc();
     ydoc.on = (ev, fun) => {
@@ -1532,7 +1603,7 @@ describe('Collab Test Suite', () => {
     });
 
     const docName = 'https://admin.entmseds-da.live/source/foo/bar.html';
-    const storage = { list: async () => new Map() };
+    const storage = { list: async () => new Map(), get: async () => undefined };
     const updObservers = [];
     const ydoc = new Y.Doc();
     ydoc.on = (ev, fun) => {
@@ -2085,30 +2156,61 @@ describe('Collab Test Suite', () => {
     assert.equal(1, decoding.readVarUint(decoder), 'ok must be 1 when no flushSave (nothing to flush)');
   });
 
+  function makeStorage(data = {}) {
+    const map = new Map(Object.entries(data));
+    return {
+      async list() { return map; },
+      async get(keyOrKeys) {
+        if (Array.isArray(keyOrKeys)) {
+          const result = new Map();
+          keyOrKeys.forEach((k) => {
+            if (map.has(k)) {
+              result.set(k, map.get(k));
+            }
+          });
+          return result;
+        }
+        return map.get(keyOrKeys);
+      },
+      async put(d) { Object.entries(d).forEach(([k, v]) => map.set(k, v)); },
+      async delete(keys) {
+        (Array.isArray(keys) ? keys : [keys]).forEach((k) => map.delete(k));
+      },
+      async deleteAll() { map.clear(); },
+    };
+  }
+
   it('readState not chunked', async () => {
     const docName = 'http://foo.bar/doc123.html';
-    const stored = new Map();
-    stored.set('docstore', new Uint8Array([254, 255]));
-    stored.set('chunks', 17); // should be ignored
-    stored.set('doc', docName);
-
-    const storage = { list: async () => stored };
+    const storage = makeStorage({
+      docstore: new Uint8Array([254, 255]),
+      chunks: 17, // should be ignored
+      doc: docName,
+    });
 
     const data = await readState(docName, storage);
     assert.deepStrictEqual(new Uint8Array([254, 255]), data);
   });
 
+  it('readState no stored doc returns undefined', async () => {
+    const storage = makeStorage({});
+
+    const data = await readState('http://foo.bar/doc123.html', storage);
+    assert.equal(data, undefined);
+  });
+
   it('readState doc mismatch', async () => {
     const docName = 'http://foo.bar/doc123.html';
-    const stored = new Map();
-    stored.set('docstore', new Uint8Array([254, 255]));
-    stored.set('chunks', 17); // should be ignored
-    stored.set('doc', 'http://foo.bar/doc456.html');
-
     const storageCalled = [];
-    const storage = {
-      list: async () => stored,
-      deleteAll: async () => storageCalled.push('deleteAll'),
+    const storage = makeStorage({
+      docstore: new Uint8Array([254, 255]),
+      chunks: 17, // should be ignored
+      doc: 'http://foo.bar/doc456.html',
+    });
+    const origDeleteAll = storage.deleteAll.bind(storage);
+    storage.deleteAll = async () => {
+      storageCalled.push('deleteAll');
+      return origDeleteAll();
     };
 
     const data = await readState(docName, storage);
@@ -2117,13 +2219,12 @@ describe('Collab Test Suite', () => {
   });
 
   it('readState chunked', async () => {
-    const stored = new Map();
-    stored.set('chunk_0', new Uint8Array([1, 2, 3]));
-    stored.set('chunk_1', new Uint8Array([4, 5]));
-    stored.set('chunks', 2);
-    stored.set('doc', 'mydoc');
-
-    const storage = { list: async () => stored };
+    const storage = makeStorage({
+      chunk_0: new Uint8Array([1, 2, 3]),
+      chunk_1: new Uint8Array([4, 5]),
+      chunks: 2,
+      doc: 'mydoc',
+    });
 
     const data = await readState('mydoc', storage);
     assert.deepStrictEqual(new Uint8Array([1, 2, 3, 4, 5]), data);
@@ -2370,7 +2471,21 @@ describe('Collab Test Suite', () => {
     const conn = {};
     const storage = {
       list: async () => stored,
-      get: async (key) => (key === 'lastsync' ? daAdminContent : undefined),
+      get: async (keyOrKeys) => {
+        if (Array.isArray(keyOrKeys)) {
+          const result = new Map();
+          keyOrKeys.forEach((k) => {
+            if (stored.has(k)) {
+              result.set(k, stored.get(k));
+            }
+          });
+          return result;
+        }
+        if (keyOrKeys === 'lastsync') {
+          return daAdminContent;
+        }
+        return stored.get(keyOrKeys);
+      },
     };
 
     const savedSetTimeout = globalThis.setTimeout;
@@ -2386,6 +2501,57 @@ describe('Collab Test Suite', () => {
       // so the pending mutations are preserved
       const result = doc2aem(ydoc);
       assert.equal(result, pendingContent, 'Should restore from CF storage preserving pending changes');
+    } finally {
+      globalThis.setTimeout = savedSetTimeout;
+      persistence.get = savedGet;
+    }
+  });
+
+  it('bindState clears stale CF storage when lastsync does not match da-admin', async () => {
+    const docName = 'https://admin.da.live/source/foo/stale.html';
+    const daAdminContent = '<body>\n  <header></header>\n  <main><div><p>current</p></div></main>\n  <footer></footer>\n</body>\n';
+
+    // CF storage has state from an older da-admin version
+    const staleDoc = new Y.Doc();
+    aem2doc('<body>\n  <header></header>\n  <main><div><p>stale</p></div></main>\n  <footer></footer>\n</body>\n', staleDoc);
+    const staleState = Y.encodeStateAsUpdate(staleDoc);
+
+    const deleteAllCalled = [];
+    const stored = new Map([
+      ['doc', docName],
+      ['docstore', staleState],
+      // lastsync is intentionally absent → lastsync !== current → !restored
+    ]);
+    const storage = {
+      list: async () => stored,
+      get: async (keyOrKeys) => {
+        if (Array.isArray(keyOrKeys)) {
+          const result = new Map();
+          keyOrKeys.forEach((k) => {
+            if (stored.has(k)) {
+              result.set(k, stored.get(k));
+            }
+          });
+          return result;
+        }
+        return stored.get(keyOrKeys);
+      },
+      deleteAll: async () => { deleteAllCalled.push(true); },
+    };
+
+    const ydoc = new Y.Doc();
+    setYDoc(docName, ydoc);
+    const conn = {};
+
+    const savedSetTimeout = globalThis.setTimeout;
+    const savedGet = persistence.get;
+    try {
+      globalThis.setTimeout = () => {}; // suppress async da-admin restore
+      persistence.get = async () => daAdminContent;
+
+      await persistence.bindState(docName, ydoc, conn, storage);
+
+      assert.deepStrictEqual(deleteAllCalled, [true], 'storage.deleteAll() must be called to clear stale CF storage');
     } finally {
       globalThis.setTimeout = savedSetTimeout;
       persistence.get = savedGet;
@@ -2426,6 +2592,217 @@ describe('Collab Test Suite', () => {
       assert.equal(1, lastsyncPuts.length, 'lastsync should be written exactly once');
       assert.equal(daAdminContent, lastsyncPuts[0][1], 'lastsync value must equal the da-admin content');
     } finally {
+      globalThis.setTimeout = savedSetTimeout;
+      persistence.get = savedGet;
+    }
+  });
+
+  // ---------------------------------------------------------------------------
+  // safePutLastsync helper + size-cap guard at both call sites
+  //
+  // Durable Object storage rejects values > 131072 bytes with a RangeError.
+  // This used to surface as `[docroom] Failed to write lastsync …` console.error
+  // at both call sites (`persistence.update` after da-admin PUT, and
+  // `persistence.bindState` after the da-admin restore fetch). The helper
+  // skips the put for oversize content and logs the skip at log-level. The
+  // absence of the `lastsync` key is already the documented trigger for the
+  // da-admin restore fallback, so skipping is safe.
+  // ---------------------------------------------------------------------------
+
+  it('safePutLastsync skips put + logs at log-level when value exceeds DO value cap', async () => {
+    const oversize = `<body>${'x'.repeat(140 * 1024)}</body>`;
+    assert(oversize.length > 131072, 'Precondition: oversize > 131072 bytes');
+
+    const putCalls = [];
+    const storage = {
+      put: async (...args) => {
+        putCalls.push(args);
+        throw new RangeError(
+          `Values cannot be larger than 131072 bytes. A value of size ${args[1].length} was provided.`,
+        );
+      },
+    };
+
+    const errors = [];
+    const logs = [];
+    const savedError = console.error;
+    const savedLog = console.log;
+    console.error = (...args) => errors.push(args);
+    console.log = (...args) => logs.push(args);
+
+    try {
+      await safePutLastsync(storage, oversize, 'oversize-doc.html', 'unit-test');
+
+      assert.equal(0, putCalls.length, 'storage.put must not be called for oversize value');
+      assert.equal(0, errors.filter(
+        (args) => typeof args[0] === 'string' && args[0].includes('Failed to write lastsync'),
+      ).length, 'No console.error must fire for the platform-deterministic size cap');
+      const skipLog = logs.find(
+        (args) => typeof args[0] === 'string' && args[0].includes('Skipping lastsync marker'),
+      );
+      assert(skipLog, 'A console.log explaining the skip should fire');
+      assert(skipLog[0].includes('unit-test'), 'Skip log should include the call-site context');
+    } finally {
+      console.error = savedError;
+      console.log = savedLog;
+    }
+  });
+
+  it('safePutLastsync writes once when value fits the DO value cap', async () => {
+    const small = 'small content';
+    const putCalls = [];
+    const storage = { put: async (...args) => putCalls.push(args) };
+
+    await safePutLastsync(storage, small, 'small-doc.html', 'unit-test');
+
+    assert.equal(1, putCalls.length, 'storage.put must be called for in-cap value');
+    assert.equal('lastsync', putCalls[0][0], 'key must be lastsync');
+    assert.equal(small, putCalls[0][1], 'value must equal the input');
+  });
+
+  it('safePutLastsync is a no-op when storage has no .put method', async () => {
+    // Should not throw, regardless of value size.
+    await safePutLastsync(undefined, 'whatever', 'no-storage.html', 'unit-test');
+    await safePutLastsync({}, 'whatever', 'no-storage.html', 'unit-test');
+  });
+
+  it('persistence.update skips lastsync put when saved content exceeds DO value cap', async () => {
+    const oversize = `<body>${'y'.repeat(140 * 1024)}</body>`;
+    assert(oversize.length > 131072, 'Precondition: oversize > 131072 bytes');
+
+    const pss = await esmock('../src/shareddoc.js', {
+      '@da-tools/da-parser': {
+        doc2aem: () => oversize,
+      },
+    });
+
+    const putCalls = [];
+    const mockYDoc = {
+      conns: { keys() { return [{}]; } },
+      name: 'http://foo.bar/0/oversize-save.html',
+      hasClientChanged: true,
+      storage: {
+        put: async (...args) => {
+          putCalls.push(args);
+          throw new RangeError(
+            `Values cannot be larger than 131072 bytes. A value of size ${args[1].length} was provided.`,
+          );
+        },
+      },
+    };
+
+    pss.persistence.put = async () => ({ ok: true, status: 200, statusText: 'OK' });
+
+    const errors = [];
+    const logs = [];
+    const savedError = console.error;
+    const savedLog = console.log;
+    console.error = (...args) => errors.push(args);
+    console.log = (...args) => logs.push(args);
+
+    try {
+      const result = await pss.persistence.update(mockYDoc, 'old content', 'oversize-save.html');
+      assert.equal(oversize, result);
+
+      const lastsyncPuts = putCalls.filter(([key]) => key === 'lastsync');
+      assert.equal(0, lastsyncPuts.length, 'lastsync put must be skipped for oversize content');
+      assert.equal(0, errors.filter(
+        (args) => typeof args[0] === 'string' && args[0].includes('Failed to write lastsync'),
+      ).length, 'No console.error for the platform-deterministic size cap');
+      assert(logs.find(
+        (args) => typeof args[0] === 'string' && args[0].includes('Skipping lastsync marker'),
+      ), 'console.log skip message must fire');
+    } finally {
+      console.error = savedError;
+      console.log = savedLog;
+    }
+  });
+
+  it('persistence.update still writes lastsync when saved content fits the DO value cap', async () => {
+    const small = 'new content';
+    const pss = await esmock('../src/shareddoc.js', {
+      '@da-tools/da-parser': {
+        doc2aem: () => small,
+      },
+    });
+
+    const putCalls = [];
+    const mockYDoc = {
+      conns: { keys() { return [{}]; } },
+      name: 'http://foo.bar/0/small-save.html',
+      hasClientChanged: true,
+      storage: {
+        put: async (...args) => putCalls.push(args),
+      },
+    };
+
+    pss.persistence.put = async () => ({ ok: true, status: 200, statusText: 'OK' });
+
+    const result = await pss.persistence.update(mockYDoc, 'old content', 'small-save.html');
+    assert.equal(small, result);
+
+    const lastsyncPuts = putCalls.filter(([key]) => key === 'lastsync');
+    assert.equal(1, lastsyncPuts.length, 'lastsync must be written for in-cap content');
+    assert.equal(small, lastsyncPuts[0][1]);
+  });
+
+  it('bindState after da-admin fetch skips lastsync put when content exceeds DO value cap', async () => {
+    const docName = 'https://admin.da.live/source/foo/oversize.html';
+    const oversize = `<body>${'z'.repeat(140 * 1024)}</body>`;
+    assert(oversize.length > 131072, 'Precondition: oversize > 131072 bytes');
+
+    const ydoc = new Y.Doc();
+    setYDoc(docName, ydoc);
+    const conn = {};
+
+    const putCalls = [];
+    const storage = {
+      list: async () => new Map(),
+      get: async () => undefined,
+      put: async (...args) => {
+        putCalls.push(args);
+        throw new RangeError(
+          `Values cannot be larger than 131072 bytes. A value of size ${args[1].length} was provided.`,
+        );
+      },
+    };
+
+    const errors = [];
+    const logs = [];
+    const savedError = console.error;
+    const savedLog = console.log;
+    console.error = (...args) => errors.push(args);
+    console.log = (...args) => logs.push(args);
+
+    const savedSetTimeout = globalThis.setTimeout;
+    const savedGet = persistence.get;
+    try {
+      let timeoutFn;
+      globalThis.setTimeout = (f) => {
+        timeoutFn = f;
+      };
+      persistence.get = async () => oversize;
+
+      await persistence.bindState(docName, ydoc, conn, storage);
+      assert(timeoutFn, 'setTimeout callback should have been registered');
+
+      await timeoutFn();
+      // The .then chain after the timeout resolves contains an awaited
+      // safePutLastsync; wait two microtasks to give it time to settle.
+      await Promise.resolve();
+      await Promise.resolve();
+
+      const lastsyncPuts = putCalls.filter(([key]) => key === 'lastsync');
+      assert.equal(0, lastsyncPuts.length, 'lastsync put must be skipped for oversize content');
+      assert.equal(0, errors.filter(
+        (args) => typeof args[0] === 'string' && args[0].includes('Failed to write lastsync'),
+      ).length, 'No console.error for the platform-deterministic size cap');
+      assert(logs.find(
+        (args) => typeof args[0] === 'string' && args[0].includes('Skipping lastsync marker'),
+      ), 'console.log skip message must fire');
+    } finally {
+      console.error = savedError;
+      console.log = savedLog;
       globalThis.setTimeout = savedSetTimeout;
       persistence.get = savedGet;
     }
@@ -2586,7 +2963,7 @@ describe('Collab Test Suite', () => {
     });
 
     const docName = 'https://admin.entmseds-da.live/source/skip-save.html';
-    const storage = { list: async () => new Map() };
+    const storage = { list: async () => new Map(), get: async () => undefined };
     const updObservers = [];
     const ydoc = new pss.WSSharedDoc(docName);
     const originalOn = ydoc.on.bind(ydoc);

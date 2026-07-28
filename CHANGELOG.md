@@ -1,3 +1,32 @@
+## [1.7.4](https://github.com/adobe/da-collab/compare/v1.7.3...v1.7.4) (2026-06-26)
+
+
+### Bug Fixes
+
+* **docroom:** await all closeConns in invalidateFromAdmin to close race window ([#178](https://github.com/adobe/da-collab/issues/178)) ([7405cb1](https://github.com/adobe/da-collab/commit/7405cb179a50f2a6d5a20462f50410f72a174154))
+
+## [1.7.3](https://github.com/adobe/da-collab/compare/v1.7.2...v1.7.3) (2026-06-18)
+
+
+### Bug Fixes
+
+* **docroom:** demote 401/403 from da-admin to non-error logs ([#175](https://github.com/adobe/da-collab/issues/175)) ([780f36d](https://github.com/adobe/da-collab/commit/780f36d65a37d24bbf7eaae70427a4a672ac7a40))
+* **docroom:** guard lastsync writes against DO 128 KiB value cap ([#174](https://github.com/adobe/da-collab/issues/174)) ([0cf15e3](https://github.com/adobe/da-collab/commit/0cf15e3583d85e65de7d5440d6b8ddee15a49598))
+
+## [1.7.2](https://github.com/adobe/da-collab/compare/v1.7.1...v1.7.2) (2026-06-16)
+
+
+### Bug Fixes
+
+* prevent bindState hang and auto-repair stale CF storage ([#173](https://github.com/adobe/da-collab/issues/173)) ([b29f7dd](https://github.com/adobe/da-collab/commit/b29f7ddfb7d83f287b425d0777bd8aee8ccc444c))
+
+## [1.7.1](https://github.com/adobe/da-collab/compare/v1.7.0...v1.7.1) (2026-06-15)
+
+
+### Bug Fixes
+
+* Durable Object best practices — all 9 fixes ([#172](https://github.com/adobe/da-collab/issues/172)) ([0ac4fac](https://github.com/adobe/da-collab/commit/0ac4fac3a453c5d9e37150e3ed67b60ac6c223f1))
+
 # [1.7.0](https://github.com/adobe/da-collab/compare/v1.6.0...v1.7.0) (2026-06-08)
 
 

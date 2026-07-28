@@ -91,6 +91,31 @@ export const messageFlushRequest = 2;
 export const messageFlushResponse = 3;
 const MAX_STORAGE_KEYS = 128;
 const MAX_STORAGE_VALUE_SIZE = 131072;
+
+/**
+ * Write the `lastsync` marker to Durable Object storage, guarded against the
+ * 128 KiB per-value cap. Cloudflare DO storage throws `RangeError` for any
+ * value larger than `MAX_STORAGE_VALUE_SIZE` — that is platform-deterministic,
+ * so we skip the write at `console.log` level rather than surfacing it as
+ * `console.error` noise. The absence of `lastsync` already triggers the
+ * documented da-admin restore fallback on DO restart, so skipping is safe.
+ */
+export const safePutLastsync = async (storage, value, docName, context) => {
+  if (!storage?.put) {
+    return;
+  }
+  if (value.length > MAX_STORAGE_VALUE_SIZE) {
+    // eslint-disable-next-line no-console
+    console.log(`[docroom] Skipping lastsync marker (${context}) - content exceeds DO value cap`, docName, `${value.length}b`);
+    return;
+  }
+  try {
+    await storage.put('lastsync', value);
+  } catch (storageErr) {
+    // non-fatal: worst case the restore falls back to da-admin
+    logError(storageErr, `[docroom] Failed to write lastsync (${context})`, storageErr);
+  }
+};
 // Matches da-admin EMPTY_DOC_SIZE — the byte-length of doc2aem(empty ydoc).
 // PUTs at or below this size are the deterministic empty stub; allowing one
 // through when no client edit happened silently overwrites real customer content
@@ -173,29 +198,38 @@ const send = (doc, conn, m) => {
  * @returns {Promise<Uint8Array | undefined>} - The stored state or undefined if not found
  */
 export const readState = async (docName, storage) => {
-  const stored = await storage.list();
-  if (stored.size === 0) {
+  const storedDoc = await storage.get('doc');
+  if (storedDoc === undefined) {
     // eslint-disable-next-line no-console
     console.log('[docroom] No stored doc in persistence');
     return undefined;
   }
 
-  if (stored.get('doc') !== docName) {
+  if (storedDoc !== docName) {
     // eslint-disable-next-line no-console
-    console.log('[docroom] Docname mismatch in persistence. Expected:', docName, 'found:', stored.get('doc'), 'Deleting storage');
+    console.log('[docroom] Docname mismatch in persistence. Expected:', docName, 'found:', storedDoc, 'Deleting storage');
     await storage.deleteAll();
     return undefined;
   }
 
-  if (stored.has('docstore')) {
+  const docstore = await storage.get('docstore');
+  if (docstore !== undefined) {
     // eslint-disable-next-line no-console
     console.log('[docroom] Document found in persistence');
-    return stored.get('docstore');
+    return docstore;
   }
 
+  const chunkCount = await storage.get('chunks');
+  if (chunkCount === undefined) {
+    return undefined;
+  }
+
+  const chunkKeys = Array.from({ length: chunkCount }, (_, i) => `chunk_${i}`);
+  const chunksMap = await storage.get(chunkKeys);
+
   const data = [];
-  for (let i = 0; i < stored.get('chunks'); i += 1) {
-    const chunk = stored.get(`chunk_${i}`);
+  for (let i = 0; i < chunkCount; i += 1) {
+    const chunk = chunksMap.get(`chunk_${i}`);
 
     // Note cannot use the spread operator here, as that goes via the stack and may lead to
     // stack overflow.
@@ -283,7 +317,7 @@ export const showError = (ydoc, err) => {
 };
 
 export const persistence = {
-  closeConn: closeConn.bind(this),
+  closeConn,
 
   /**
    * Get the document from da-admin.
@@ -304,8 +338,20 @@ export const persistence = {
     if (initialReq.ok) {
       return docType === 'json' ? initialReq.json() : initialReq.text();
     } else {
-      // eslint-disable-next-line no-console
-      console.error(`[docroom] Unable to get resource from da-admin: ${initialReq.status} - ${initialReq.statusText}`);
+      const msg = `[docroom] Unable to get resource from da-admin: ${initialReq.status} - ${initialReq.statusText}`;
+      // 401/403 are auth/ACL outcomes the worker cannot bypass — operational
+      // noise, not service errors. Mirror persistence.update's PUT demotion so
+      // the error stream stays a real-signal channel (see #135).
+      if (initialReq.status === 401) {
+        // eslint-disable-next-line no-console
+        console.warn(msg);
+      } else if (initialReq.status === 403) {
+        // eslint-disable-next-line no-console
+        console.log(msg);
+      } else {
+        // eslint-disable-next-line no-console
+        console.error(msg);
+      }
       const err = new Error(`unable to get resource - status: ${initialReq.status}`);
       err.status = initialReq.status;
       throw err;
@@ -422,15 +468,7 @@ export const persistence = {
         // Record what we just PUT so that on DO restart we can tell whether
         // CF storage is ahead of da-admin (safe to use) vs. da-admin was
         // externally modified (must use da-admin).
-        if (ydoc.storage?.put) {
-          try {
-            await ydoc.storage.put('lastsync', content);
-          } catch (storageErr) {
-            // non-fatal: worst case the restore falls back to da-admin
-            // eslint-disable-next-line no-console
-            console.error('[docroom] Failed to write lastsync marker', storageErr);
-          }
-        }
+        await safePutLastsync(ydoc.storage, content, docName, 'after da-admin PUT');
         return content;
       }
     } catch (err) {
@@ -465,7 +503,7 @@ export const persistence = {
    * @param {WebSocket} conn - the websocket connection
    * @param {TransactionalStorage} storage - the worker transactional storage object
    */
-  bindState: async (docName, ydoc, conn, storage) => {
+  bindState: async (docName, ydoc, conn, storage, ctx) => {
     const docType = getDocType(docName);
     let timingReadStateDuration;
 
@@ -490,22 +528,23 @@ export const persistence = {
       if (stored && stored.length > 0) {
         Y.applyUpdate(ydoc, stored);
 
-        // CF storage is valid to use if:
-        // 1. Its rendered content matches da-admin exactly (nothing pending), OR
-        // 2. da-admin still has the same content as the last successful sync —
-        //    meaning CF storage is ahead of da-admin (unsaved pending changes) but
-        //    was built on top of it. Using CF storage preserves those pending changes.
-        //    This correctly handles DO migration while a debounced save is in flight.
-        //    If da-admin was externally modified since the last sync, lastSynced !==
-        //    current, so we fall back to da-admin (external edit wins).
-        const fromStorage = docType === 'json' ? doc2json(ydoc) : doc2aem(ydoc);
+        // CF storage is valid to use if da-admin still has the same content as the
+        // last successful sync — meaning CF storage is either in sync with or ahead
+        // of da-admin (unsaved pending changes built on top of it).
+        // Using CF storage preserves those pending changes.
+        // If da-admin was externally modified since the last sync, lastSynced !==
+        // current, so we fall back to da-admin (external edit wins).
+        //
+        // NOTE: we intentionally do NOT call doc2aem/doc2json here. Those are
+        // synchronous serialisers that can block the CF event loop for an extended
+        // time when the stored ydoc state is large or structurally unexpected,
+        // causing the DO to be terminated before bindState completes.
+        // The lastsync anchor alone is sufficient to determine validity.
         const lastSynced = storage.get ? await storage.get('lastsync') : undefined;
-        if (fromStorage === current || lastSynced === current) {
+        if (lastSynced === current) {
           restored = true;
-
-          const syncState = fromStorage === current ? '(in sync with da-admin)' : '(has pending unsaved changes)';
           // eslint-disable-next-line no-console
-          console.log('[docroom] Restored from worker persistence', docName, syncState);
+          console.log('[docroom] Restored from worker persistence', docName, '(lastsync matches da-admin)');
         }
       }
     } catch (error) {
@@ -516,9 +555,12 @@ export const persistence = {
     }
 
     if (!restored && current) {
-      // The doc was not restored from worker persistence, so read it from da-admin,
-      // but do this async to give the ydoc some time to get synced up first. Without
-      // this timeout, the ydoc can get confused which may result in duplicated content.
+      // The doc was not restored from worker persistence, so read it from da-admin.
+      // Clear stale CF storage so the next save writes clean state instead of
+      // accumulating diverged CRDT updates that can cause future bindState hangs.
+      if (storage.deleteAll) {
+        await storage.deleteAll();
+      }
       // eslint-disable-next-line no-console
       console.log('[docroom] Could not be restored, trying to restore from da-admin', docName);
 
@@ -528,65 +570,66 @@ export const persistence = {
       // and we must NOT overwrite with the stale da-admin snapshot.
       const svBefore = Y.encodeStateVector(ydoc);
 
-      setTimeout(async () => {
-        if (ydoc === docs.get(docName)) {
-          const svAfter = Y.encodeStateVector(ydoc);
-          const clientHasUpdated = svBefore.length !== svAfter.length
-            || svBefore.some((v, i) => v !== svAfter[i]);
-          if (clientHasUpdated) {
-            // eslint-disable-next-line no-console
-            console.log('[docroom] Skipping da-admin reload: client state received', docName);
-          } else {
-            try {
-              ydoc.transact(() => {
-                if (docType === 'json') {
-                  // Clear JSON structure
-                  const ysheets = ydoc.getArray('sheets');
-                  if (ysheets.length > 0) {
-                    ysheets.delete(0, ysheets.length);
-                  }
-                  // restore from da-admin
-                  json2doc(current, ydoc);
-                } else {
-                  // Clear HTML structure
-                  const rootType = ydoc.getXmlFragment('prosemirror');
-                  rootType.delete(0, rootType.length);
-                  // clear all maps
-                  ydoc.share.forEach((type) => {
-                    if (type instanceof Y.Map) {
-                      type.clear();
-                    }
-                  });
-                  // Restore from da-admin
-                  aem2doc(current, ydoc);
-                }
-              });
-
+      const restoreAfterDelay = new Promise((resolve) => {
+        setTimeout(resolve, 1000);
+      })
+        .then(async () => {
+          if (ydoc === docs.get(docName)) {
+            const svAfter = Y.encodeStateVector(ydoc);
+            const clientHasUpdated = svBefore.length !== svAfter.length
+              || svBefore.some((v, i) => v !== svAfter[i]);
+            if (clientHasUpdated) {
               // eslint-disable-next-line no-console
-              console.log('[docroom] Restored from da-admin', docName, docType);
-            } catch (error) {
-              logError(error, '[docroom] Problem restoring state from da-admin', docName, error, current);
-              if (!isExpectedPlatformEvent(error)) {
-                showError(ydoc, error);
+              console.log('[docroom] Skipping da-admin reload: client state received', docName);
+            } else {
+              try {
+                ydoc.transact(() => {
+                  if (docType === 'json') {
+                    // Clear JSON structure
+                    const ysheets = ydoc.getArray('sheets');
+                    if (ysheets.length > 0) {
+                      ysheets.delete(0, ysheets.length);
+                    }
+                    // restore from da-admin
+                    json2doc(current, ydoc);
+                  } else {
+                    // Clear HTML structure
+                    const rootType = ydoc.getXmlFragment('prosemirror');
+                    rootType.delete(0, rootType.length);
+                    // clear all maps
+                    ydoc.share.forEach((type) => {
+                      if (type instanceof Y.Map) {
+                        type.clear();
+                      }
+                    });
+                    // Restore from da-admin
+                    aem2doc(current, ydoc);
+                  }
+                });
+
+                // eslint-disable-next-line no-console
+                console.log('[docroom] Restored from da-admin', docName, docType);
+              } catch (error) {
+                logError(error, '[docroom] Problem restoring state from da-admin', docName, error, current);
+                if (!isExpectedPlatformEvent(error)) {
+                  showError(ydoc, error);
+                }
               }
             }
-          }
 
-          // Write lastsync anchor regardless of whether we restored or the client
-          // had already sent updates. CF storage is now anchored to `current`, so
-          // on DO restart we can detect it as a valid continuation even if no PUT
-          // to da-admin has happened yet.
-          if (storage?.put) {
-            try {
-              await storage.put('lastsync', current);
-            } catch (storageErr) {
-              // non-fatal
-              // eslint-disable-next-line no-console
-              console.error('[docroom] Failed to write lastsync after da-admin fetch', storageErr);
-            }
+            // Write lastsync anchor regardless of whether we restored or the client
+            // had already sent updates. CF storage is now anchored to `current`, so
+            // on DO restart we can detect it as a valid continuation even if no PUT
+            // to da-admin has happened yet.
+            await safePutLastsync(storage, current, docName, 'after da-admin fetch');
           }
-        }
-      }, 1000);
+        });
+
+      if (ctx?.waitUntil) {
+        ctx.waitUntil(restoreAfterDelay);
+      } else {
+        restoreAfterDelay.catch(() => {});
+      }
     }
 
     ydoc.on('update', async () => {
@@ -719,7 +762,7 @@ export class WSSharedDoc extends Y.Doc {
  * @param {boolean} gc - whether garbage collection is enabled
  * @returns The Yjs document object, which may be shared across multiple sockets.
  */
-export const getYDoc = async (docname, conn, env, storage, timingData, gc = true) => {
+export const getYDoc = async (docname, conn, env, storage, timingData, ctx, gc = true) => {
   let doc = docs.get(docname);
   if (doc === undefined) {
     // The doc is not yet in the cache, create a new one.
@@ -742,7 +785,7 @@ export const getYDoc = async (docname, conn, env, storage, timingData, gc = true
   if (!doc.promise) {
     // The doc is not yet bound to the persistence layer, do so now. The promise will be resolved
     // when bound.
-    doc.promise = persistence.bindState(docname, doc, conn, storage);
+    doc.promise = persistence.bindState(docname, doc, conn, storage, ctx);
   }
 
   // We wait for the promise, for second and subsequent connections to the same doc, this will
@@ -859,9 +902,11 @@ export const invalidateFromAdmin = async (docName) => {
   console.log('[worker] Invalidate from Admin received', docName);
   const ydoc = docs.get(docName);
   if (ydoc) {
-    // As we are closing all connections, the ydoc will be removed from the docs map
-    ydoc.conns.forEach((_, c) => closeConn(ydoc, c));
-
+    // Await all closeConn calls so that flushSave + docs.delete complete before
+    // this function returns. Without this, an editor that reconnects during the
+    // flushSave window finds the stale ydoc still in `docs` and reuses it
+    // instead of creating a fresh one that loads the new da-admin content.
+    await Promise.all(Array.from(ydoc.conns.keys()).map((c) => closeConn(ydoc, c)));
     return true;
   } else {
     // eslint-disable-next-line no-console
@@ -880,7 +925,7 @@ export const invalidateFromAdmin = async (docName) => {
  *   handles message/close routing via class methods instead of addEventListener).
  * @returns {Promise<void>} - The return value of this
  */
-export const setupWSConnection = async (conn, docName, env, storage, hibernation = false) => {
+export const setupWSConnection = async (conn, docName, env, storage, ctx, hibernation = false) => {
   const timingData = new Map();
 
   // eslint-disable-next-line no-param-reassign
@@ -900,7 +945,7 @@ export const setupWSConnection = async (conn, docName, env, storage, hibernation
   }
 
   // get doc, initialize if it does not exist yet
-  const doc = await getYDoc(docName, conn, env, storage, timingData, true);
+  const doc = await getYDoc(docName, conn, env, storage, timingData, ctx, true);
 
   if (!hibernation) {
     // listen and reply to events
@@ -939,15 +984,15 @@ export const setupWSConnection = async (conn, docName, env, storage, hibernation
  * @param {TransactionalStorage} storage - The durable object storage
  * @param {ArrayBuffer|string} message - The raw message from the WebSocket
  */
-export const handleWebSocketMessage = async (conn, docName, env, storage, message) => {
+export const handleWebSocketMessage = async (conn, docName, env, storage, message, ctx) => {
   let doc = docs.get(docName);
   if (!doc) {
     // DO was hibernated; re-establish Yjs state without re-registering event listeners
-    await setupWSConnection(conn, docName, env, storage, true);
+    await setupWSConnection(conn, docName, env, storage, ctx, true);
     doc = docs.get(docName);
   }
   if (doc) {
-    messageListener(conn, doc, new Uint8Array(message));
+    await messageListener(conn, doc, new Uint8Array(message));
   }
 };
 
@@ -956,9 +1001,9 @@ export const handleWebSocketMessage = async (conn, docName, env, storage, messag
  * @param {WebSocket} conn - The WebSocket connection
  * @param {string} docName - The document name
  */
-export const handleWebSocketClose = (conn, docName) => {
+export const handleWebSocketClose = async (conn, docName) => {
   const doc = docs.get(docName);
   if (doc) {
-    closeConn(doc, conn);
+    await closeConn(doc, conn);
   }
 };

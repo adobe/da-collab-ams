@@ -17,16 +17,16 @@
 # Secret COLLAB_SHARED_SECRET (shared with da-admin) is pushed via `wrangler secret
 # put` by ams-eds-terraform's populate-secrets.sh — not templated here.
 
-name = "da-collab-ams-ent-aem"
+name = "da-collab-ams-${NODE_ENV}"
 main = "src/edge.js"
 compatibility_date = "2023-10-30"
-account_id = "ff68e0f71563bc546fedcfda6bd8e5ca"
+account_id = "${CLOUDFLARE_ACCOUNT_ID}"
 keep_vars = true
 
-routes = [{ pattern = "collab.ent-da.live/*", zone_name = "ent-da.live" }]
+routes = [{ pattern = "collab.${DA_DOMAIN}/*", zone_name = "${DA_DOMAIN}" }]
 
 services = [
-  { binding = "daadmin", service = "da-admin-ams-ent-aem" }
+  { binding = "daadmin", service = "da-admin-ams-${NODE_ENV}" }
 ]
 
 [durable_objects]
@@ -40,9 +40,9 @@ new_classes = ["DocRoom"]
 port = 8789
 
 [vars]
-ENVIRONMENT = "ent-aem"
-DA_DOMAIN = "ent-da.live"
-ADMIN_ORIGIN = "https://admin.ent-da.live"
+ENVIRONMENT = "${NODE_ENV}"
+DA_DOMAIN = "${DA_DOMAIN}"
+ADMIN_ORIGIN = "https://admin.${DA_DOMAIN}"
 VERSION = "@@VERSION@@"
-CF_ACCOUNT_ID = "ff68e0f71563bc546fedcfda6bd8e5ca"
+CF_ACCOUNT_ID = "${CLOUDFLARE_ACCOUNT_ID}"
 RETURN_STACK_TRACES = "false"

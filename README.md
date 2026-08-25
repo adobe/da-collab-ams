@@ -5,7 +5,7 @@ It's implemented as a Cloudflare Worker using a Durable Object.
 
 ## Developing locally
 ### Run
-To run da-collab locally da-admin also needs to be run locally. This is because da-collab uses a service binding
+To run da-collab-ams locally da-admin-ams also needs to be run locally. This is because da-collab-ams uses a service binding
 to communicate with da-admin. When run locally the service binding will be local as well.
 
 To run da-admin locally see https://github.com/adobe/da-admin/blob/main/README.md
@@ -13,23 +13,25 @@ To run da-admin locally see https://github.com/adobe/da-admin/blob/main/README.m
 1. Clone this repo to your computer.
 1. Run `npm install`
 1. In a terminal, run `npm run dev` this repo's folder.
-1. The da-collab service API is available via http://localhost:4711
+1. The da-collab-ams service API is available via http://localhost:4711
 
 #### Access via da-live
 
-To access the locally running da-collab via da-live also running locally, first run da-live on your local machine
-in addition to da-collab and da-admin. See here for instructions: https://github.com/adobe/da-live/blob/main/README.md
+To access the locally running da-collab-ams via da-live also running locally, first run da-live on your local machine
+in addition to da-collab-ams and da-admin. See here for instructions: https://github.com/adobe/da-live/blob/main/README.md
 
-Then open a browser and access: http://localhost:3000/?da-admin=local&da-collab=local
+Then open a browser and access: http://localhost:3000/?da-admin=local&da-collab-ams=local
 
 ### Run on stage
-You can deploy da-collab on Cloudflare stage via `npm deploy:stage` to test it in a real worker environment. Don't
-forget to deploy da-admin on stage as well, as otherwise you might be connecting to an old version.
+`wrangler.toml` is generated from `wrangler.toml.tpl` via env vars (see `scripts/render-wrangler.js`), sourced from
+`ams-eds-terraform`'s `environments/<env>.env`. With that env sourced, run `npm run deploy` to deploy to Cloudflare
+and test in a real worker environment. Don't forget to deploy da-admin-ams as well, as otherwise you might be
+connecting to an old version.
 
-To access da-collab and da-admin running on stage, open this URL in a browser: http://localhost:3000/?da-admin=stage&da-collab=stage
+To access da-collab-ams and da-admin-ams running on stage, open this URL in a browser: http://localhost:3000/?da-admin=stage&da-collab-ams=stage
 
 #### Notes
-1. When passing in `?da-collab=local&da-admin=local` each service will set a localStorage value and will not clear until you use `?name-of-service=reset`. It is recommended to use an incognito browser window to ensure you don't forget about this setting.
+1. When passing in `?da-collab-ams=local&da-admin=local` each service will set a localStorage value and will not clear until you use `?name-of-service=reset`. It is recommended to use an incognito browser window to ensure you don't forget about this setting.
 
 ## Additional details
 ### Recommendations

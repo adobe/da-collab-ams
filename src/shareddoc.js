@@ -24,25 +24,27 @@ const wsReadyStateOpen = 1;
 
 /**
  * @param {string} docName - the document URL
+ * @param {string} liveHost - the AEM live domain, whose api. host serves the Helix documents
  */
-export const isHelixDoc = (docName) => docName.startsWith('https://api.entmseds.live/');
+export const isHelixDoc = (docName, liveHost) => docName.startsWith(`https://api.${liveHost}/`);
 
 /**
  * Resolve the content backend for a document.
  *
- * Documents under https://api.entmseds.live live in Helix and are reached over the
+ * Documents under https://api.<liveHost> live in Helix and are reached over the
  * public internet (the global fetch); everything else is read and written
  * through the da-admin service binding.
  *
  * @param {string} docName - the document URL
  * @param {Fetcher} daadmin - the da-admin service binding
+ * @param {string} liveHost - the AEM live domain
  * @returns {{
  *   fetch: (url: string, opts?: object) => Promise<Response>,
  *   putReqData: (content: string, mimeType: string) => { body: *, size: number, headers: object },
  * }}
  */
-export function getBackend(docName, daadmin) {
-  const isHelix = isHelixDoc(docName);
+export function getBackend(docName, daadmin, liveHost) {
+  const isHelix = isHelixDoc(docName, liveHost);
 
   return {
     // A fetch that already knows where to go.
@@ -324,17 +326,18 @@ export const persistence = {
    * @param {string} docName - The document name
    * @param {string} auth - The authorization header
    * @param {object} daadmin - The da-admin worker service binding
+   * @param {string} liveHost - The AEM live domain
    * @returns {Promise<string>} - The content of the document
    * @throws {Error} - If the document cannot be retrieved (including 404)
    */
-  get: async (docName, auth, daadmin) => {
+  get: async (docName, auth, daadmin, liveHost) => {
     const docType = getDocType(docName);
     const initalOpts = {};
     if (auth) {
       initalOpts.headers = new Headers({ Authorization: auth });
     }
 
-    const initialReq = await getBackend(docName, daadmin).fetch(docName, initalOpts);
+    const initialReq = await getBackend(docName, daadmin, liveHost).fetch(docName, initalOpts);
     if (initialReq.ok) {
       return docType === 'json' ? initialReq.json() : initialReq.text();
     } else {
@@ -366,7 +369,7 @@ export const persistence = {
    * @returns {Promise<object>} The response from da-admin.
    */
   put: async (ydoc, content) => {
-    const backend = getBackend(ydoc.name, ydoc.daadmin);
+    const backend = getBackend(ydoc.name, ydoc.daadmin, ydoc.liveHost);
     const mimeType = getDocType(ydoc.name) === 'json' ? 'application/json' : 'text/html';
     const { body: putBody, size: bodySize, headers: bodyHeaders } = backend
       .putReqData(content, mimeType);
@@ -516,7 +519,7 @@ export const persistence = {
 
     // Get document from da-admin (throws on error including 404)
     const timingBeforeDaAdminGet = Date.now();
-    current = await persistence.get(docName, conn.auth, ydoc.daadmin);
+    current = await persistence.get(docName, conn.auth, ydoc.daadmin, ydoc.liveHost);
     const timingDaAdminGetDuration = Date.now() - timingBeforeDaAdminGet;
 
     // Read the stored state from internal worker storage (errors are non-fatal)
@@ -782,6 +785,7 @@ export const getYDoc = async (docname, conn, env, storage, timingData, ctx, gc =
 
   // Store the service binding to da-admin which we receive through the environment in the doc
   doc.daadmin = env.daadmin;
+  doc.liveHost = env.HLX_PROD_SERVER_HOST_LIVE;
   if (!doc.promise) {
     // The doc is not yet bound to the persistence layer, do so now. The promise will be resolved
     // when bound.

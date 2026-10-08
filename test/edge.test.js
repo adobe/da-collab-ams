@@ -17,6 +17,9 @@ import defaultEdge, {
 } from '../src/edge.js';
 import { WSSharedDoc, persistence, setYDoc } from '../src/shareddoc.js';
 
+const HLX_PROD_SERVER_HOST_LIVE = process.env.HLX_PROD_SERVER_HOST_LIVE
+  || 'BAD_VAR_daCollab_HLX_PROD_SERVER_HOST_LIVE';
+
 function makeCtx(storage = null) {
   const accepted = [];
   return {
@@ -1275,11 +1278,11 @@ describe('Worker test suite', () => {
   // Backend resolution (api-live-switch branch)
   //
   // The backend is derived from the doc URL alone — there is no X-is-helix
-  // header or isHelix attachment field. api.entmseds.live docs are reached via the
+  // header or isHelix attachment field. api.<HLX_PROD_SERVER_HOST_LIVE> docs are reached via the
   // global fetch; everything else via the da-admin service binding.
   // ---------------------------------------------------------------------------
 
-  it('Test handleApiRequest routes an api.entmseds.live HEAD through the global fetch', async () => {
+  it('Test handleApiRequest routes a Helix doc HEAD through the global fetch', async () => {
     const savedFetch = globalThis.fetch;
     const helixCalls = [];
     globalThis.fetch = async (url, opts) => {
@@ -1305,11 +1308,11 @@ describe('Worker test suite', () => {
       idFromName(nm) { return `id${hash(nm)}`; },
       get() { return myRoom; },
     };
-    const env = { rooms, daadmin };
+    const env = { rooms, daadmin, HLX_PROD_SERVER_HOST_LIVE };
 
     try {
       const req = {
-        url: 'http://do.re.mi/https://api.entmseds.live/o/r/p.html',
+        url: `http://do.re.mi/https://api.${HLX_PROD_SERVER_HOST_LIVE}/o/r/p.html`,
         headers: new Headers(),
       };
       const res = await handleApiRequest(req, env);
@@ -1317,12 +1320,12 @@ describe('Worker test suite', () => {
 
       assert.equal(1, helixCalls.length, 'the global fetch must be used for the Helix HEAD');
       assert.equal('HEAD', helixCalls[0].opts.method);
-      assert.equal('https://api.entmseds.live/o/r/p.html', helixCalls[0].url);
+      assert.equal(`https://api.${HLX_PROD_SERVER_HOST_LIVE}/o/r/p.html`, helixCalls[0].url);
       assert.equal(0, daadminCalls.length, 'daadmin.fetch must NOT be called for Helix docs');
 
       assert.equal(1, roomFetchCalls.length);
       assert.equal(
-        'https://api.entmseds.live/o/r/p.html',
+        `https://api.${HLX_PROD_SERVER_HOST_LIVE}/o/r/p.html`,
         roomFetchCalls[0].headers.get('X-collab-room'),
       );
       assert.equal(
@@ -1371,16 +1374,16 @@ describe('Worker test suite', () => {
     }
   });
 
-  it('Test handleApiRequest still rejects api.entmseds.* hosts that are not api.entmseds.live', async () => {
+  it('Test handleApiRequest still rejects hosts that only look like the Helix host', async () => {
     const req = {
-      url: 'http://do.re.mi/https://api.entmseds.fake/laaa.html',
+      url: `http://do.re.mi/https://api.${HLX_PROD_SERVER_HOST_LIVE}.fake/laaa.html`,
       headers: new Headers(),
     };
-    const res = await handleApiRequest(req, { daadmin: {} });
-    assert.equal(404, res.status, 'Only api.entmseds.live (with trailing slash) is whitelisted');
+    const res = await handleApiRequest(req, { daadmin: {}, HLX_PROD_SERVER_HOST_LIVE });
+    assert.equal(404, res.status, 'Only the Helix host (with trailing slash) is whitelisted');
   });
 
-  it('Test DocRoom fetch forces read,write authActions for an api.entmseds.live doc', async () => {
+  it('Test DocRoom fetch forces read,write authActions for a Helix doc', async () => {
     const savedNWSP = DocRoom.newWebSocketPair;
     const savedBS = persistence.bindState;
 
@@ -1394,11 +1397,11 @@ describe('Worker test suite', () => {
       };
       DocRoom.newWebSocketPair = () => [{}, wsp1];
 
-      const dr = new DocRoom(makeCtx(null), { daadmin: {} });
+      const dr = new DocRoom(makeCtx(null), { daadmin: {}, HLX_PROD_SERVER_HOST_LIVE });
       const headers = new Headers({
         Upgrade: 'websocket',
         Authorization: 'au-helix',
-        'X-collab-room': 'https://api.entmseds.live/o/r/p.html',
+        'X-collab-room': `https://api.${HLX_PROD_SERVER_HOST_LIVE}/o/r/p.html`,
         // Empty X-auth-actions would normally mark the conn read-only; for a
         // Helix doc the backend's read,write default must override it.
         'X-auth-actions': '',
@@ -1408,7 +1411,7 @@ describe('Worker test suite', () => {
 
       assert.equal(306, resp.status);
       assert.equal(1, attachCalled.length);
-      assert.equal('https://api.entmseds.live/o/r/p.html', attachCalled[0].docName);
+      assert.equal(`https://api.${HLX_PROD_SERVER_HOST_LIVE}/o/r/p.html`, attachCalled[0].docName);
       assert.equal('au-helix', attachCalled[0].auth);
       assert.equal(
         'read,write',
@@ -1458,7 +1461,7 @@ describe('Worker test suite', () => {
     }
   });
 
-  it('Test DocRoom routes an api.entmseds.live doc to bindState (Helix backend derived from URL)', async () => {
+  it('Test DocRoom routes a Helix doc to bindState (Helix backend derived from URL)', async () => {
     const savedNWSP = DocRoom.newWebSocketPair;
     const savedBS = persistence.bindState;
 
@@ -1476,7 +1479,7 @@ describe('Worker test suite', () => {
       const dr = new DocRoom(makeCtx(null), { daadmin });
       const headers = new Headers({
         Upgrade: 'websocket',
-        'X-collab-room': 'https://api.entmseds.live/x.html',
+        'X-collab-room': `https://api.${HLX_PROD_SERVER_HOST_LIVE}/x.html`,
       });
       const req = { headers, url: 'http://localhost:4711/' };
       const resp = await dr.fetch(req, {}, 306);
@@ -1486,7 +1489,7 @@ describe('Worker test suite', () => {
       await sleep(10);
 
       assert.equal(1, bindCalled.length);
-      assert.equal('https://api.entmseds.live/x.html', bindCalled[0].nm);
+      assert.equal(`https://api.${HLX_PROD_SERVER_HOST_LIVE}/x.html`, bindCalled[0].nm);
     } finally {
       DocRoom.newWebSocketPair = savedNWSP;
       persistence.bindState = savedBS;
@@ -1559,7 +1562,7 @@ describe('Worker test suite', () => {
         return new Map();
       };
 
-      const docName = 'https://api.entmseds.live/cold-helix.html';
+      const docName = `https://api.${HLX_PROD_SERVER_HOST_LIVE}/cold-helix.html`;
       const mockConn = {
         auth: undefined,
         readOnly: undefined,

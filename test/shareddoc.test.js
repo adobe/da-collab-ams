@@ -27,6 +27,9 @@ import {
   showError, storeState, updateHandler, WSSharedDoc,
 } from '../src/shareddoc.js';
 
+const HLX_PROD_SERVER_HOST_LIVE = process.env.HLX_PROD_SERVER_HOST_LIVE
+  || 'BAD_VAR_daCollab_HLX_PROD_SERVER_HOST_LIVE';
+
 function isSubArray(full, sub) {
   if (sub.length === 0) {
     return true;
@@ -3010,7 +3013,7 @@ describe('Collab Test Suite', () => {
   // Backend resolution (api-live-switch branch)
   //
   // The storage backend is determined entirely by the doc URL: docs under
-  // https://api.entmseds.live live in Helix (global fetch); everything else goes
+  // https://api.<HLX_PROD_SERVER_HOST_LIVE> live in Helix (global fetch); everything else goes
   // through the da-admin service binding. There is no isHelix flag to thread.
   // ---------------------------------------------------------------------------
 
@@ -3030,7 +3033,7 @@ describe('Collab Test Suite', () => {
     assert.equal('https://admin.entmseds-da.live/x.html', calls[0].url);
   });
 
-  it('getBackend routes api.entmseds.live docs through the global fetch', async () => {
+  it('getBackend routes Helix docs through the global fetch', async () => {
     const savedFetch = globalThis.fetch;
     const calls = [];
     globalThis.fetch = async (url, opts) => {
@@ -3041,12 +3044,12 @@ describe('Collab Test Suite', () => {
       const daadmin = {
         fetch: async () => { assert.fail('daadmin.fetch must not be called for Helix docs'); },
       };
-      const backend = getBackend('https://api.entmseds.live/o/r/p.html', daadmin);
-      const resp = await backend.fetch('https://api.entmseds.live/o/r/p.html', { method: 'HEAD' });
+      const backend = getBackend(`https://api.${HLX_PROD_SERVER_HOST_LIVE}/o/r/p.html`, daadmin, HLX_PROD_SERVER_HOST_LIVE);
+      const resp = await backend.fetch(`https://api.${HLX_PROD_SERVER_HOST_LIVE}/o/r/p.html`, { method: 'HEAD' });
 
       assert.equal('helix-resp', resp);
       assert.equal(1, calls.length);
-      assert.equal('https://api.entmseds.live/o/r/p.html', calls[0].url);
+      assert.equal(`https://api.${HLX_PROD_SERVER_HOST_LIVE}/o/r/p.html`, calls[0].url);
     } finally {
       globalThis.fetch = savedFetch;
     }
@@ -3062,7 +3065,7 @@ describe('Collab Test Suite', () => {
   });
 
   it('getBackend.putReqData sends raw body + Content-Type for Helix docs', () => {
-    const backend = getBackend('https://api.entmseds.live/o/r/p.html', {});
+    const backend = getBackend(`https://api.${HLX_PROD_SERVER_HOST_LIVE}/o/r/p.html`, {}, HLX_PROD_SERVER_HOST_LIVE);
     const { body, size, headers } = backend.putReqData('hello world', 'text/html');
 
     assert.strictEqual(body, 'hello world', 'Helix PUT body must be the raw content string');
@@ -3070,13 +3073,13 @@ describe('Collab Test Suite', () => {
     assert.deepStrictEqual(headers, { 'Content-Type': 'text/html' });
   });
 
-  it('isHelixDoc is true only for api.entmseds.live doc URLs', () => {
-    assert.equal(isHelixDoc('https://api.entmseds.live/o/r/p.html'), true);
+  it('isHelixDoc is true only for Helix doc URLs', () => {
+    assert.equal(isHelixDoc(`https://api.${HLX_PROD_SERVER_HOST_LIVE}/o/r/p.html`, HLX_PROD_SERVER_HOST_LIVE), true);
     assert.equal(isHelixDoc('https://admin.entmseds-da.live/x.html'), false);
-    assert.equal(isHelixDoc('http://localhost:8080/x.html'), false);
+    assert.equal(isHelixDoc('http://localhost:8080/x.html', HLX_PROD_SERVER_HOST_LIVE), false);
   });
 
-  it('persistence.get routes to the global fetch for an api.entmseds.live doc', async () => {
+  it('persistence.get routes to the global fetch for a Helix doc', async () => {
     const savedFetch = globalThis.fetch;
     const calls = [];
     globalThis.fetch = async (url, opts) => {
@@ -3090,13 +3093,14 @@ describe('Collab Test Suite', () => {
         fetch: async () => { assert.fail('daadmin.fetch must not be called for Helix docs'); },
       };
       const result = await persistence.get(
-        'https://api.entmseds.live/owner/repo/page.html',
+        `https://api.${HLX_PROD_SERVER_HOST_LIVE}/owner/repo/page.html`,
         'Bearer t',
         daadmin,
+        HLX_PROD_SERVER_HOST_LIVE,
       );
       assert.equal(result, 'helix content');
       assert.equal(1, calls.length);
-      assert.equal(calls[0].url, 'https://api.entmseds.live/owner/repo/page.html');
+      assert.equal(calls[0].url, `https://api.${HLX_PROD_SERVER_HOST_LIVE}/owner/repo/page.html`);
       assert.equal(calls[0].opts.headers.get('Authorization'), 'Bearer t');
     } finally {
       globalThis.fetch = savedFetch;
@@ -3114,8 +3118,9 @@ describe('Collab Test Suite', () => {
       const conns = new Map();
       conns.set({ auth: 'Bearer abc' }, new Set());
       const ydoc = {
-        name: 'https://api.entmseds.live/owner/repo/page.html',
+        name: `https://api.${HLX_PROD_SERVER_HOST_LIVE}/owner/repo/page.html`,
         conns,
+        liveHost: HLX_PROD_SERVER_HOST_LIVE,
         daadmin: {
           fetch: async () => { assert.fail('daadmin.fetch must not be called for Helix docs'); },
         },
@@ -3126,7 +3131,7 @@ describe('Collab Test Suite', () => {
       assert(result.ok);
       assert.equal(1, calls.length);
       const { url, opts } = calls[0];
-      assert.equal(url, 'https://api.entmseds.live/owner/repo/page.html');
+      assert.equal(url, `https://api.${HLX_PROD_SERVER_HOST_LIVE}/owner/repo/page.html`);
       assert.equal(opts.method, 'PUT');
       assert.strictEqual(opts.body, body, 'Helix PUT body must be the raw content string, not FormData');
       assert.equal(opts.headers.get('Content-Type'), 'text/html');
@@ -3149,8 +3154,9 @@ describe('Collab Test Suite', () => {
       const conns = new Map();
       conns.set({ auth: 'a' }, new Set());
       const ydoc = {
-        name: 'https://api.entmseds.live/o/r/d.json',
+        name: `https://api.${HLX_PROD_SERVER_HOST_LIVE}/o/r/d.json`,
         conns,
+        liveHost: HLX_PROD_SERVER_HOST_LIVE,
         daadmin: {},
       };
       const longBody = '{"data":"long enough to not trigger empty stub warning padding padding padding"}';
@@ -3202,8 +3208,9 @@ describe('Collab Test Suite', () => {
     };
     persistence.update = async () => {};
     try {
-      const docName = 'https://api.entmseds.live/o/r/bindstate.html';
+      const docName = `https://api.${HLX_PROD_SERVER_HOST_LIVE}/o/r/bindstate.html`;
       const ydoc = new Y.Doc();
+      ydoc.liveHost = HLX_PROD_SERVER_HOST_LIVE;
       ydoc.daadmin = {
         fetch: async () => { assert.fail('daadmin.fetch must not be called for Helix docs'); },
       };

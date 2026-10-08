@@ -13,6 +13,7 @@
 #   NODE_ENV                     short env name (worker name suffix + service binding)
 #   CLOUDFLARE_ACCOUNT_ID        Cloudflare account ID
 #   DA_DOMAIN                    DA domain (route host, ADMIN_ORIGIN, zone)
+#   HLX_PROD_SERVER_HOST_LIVE    AEM live domain (api.<domain> serves Helix documents)
 #
 # Secret COLLAB_SHARED_SECRET (shared with da-admin) is pushed via `wrangler secret
 # put` by ams-eds-terraform's populate-secrets.sh — not templated here.
@@ -43,6 +44,7 @@ port = 8789
 ENVIRONMENT = "${NODE_ENV}"
 DA_DOMAIN = "${DA_DOMAIN}"
 ADMIN_ORIGIN = "https://admin.${DA_DOMAIN}"
+HLX_PROD_SERVER_HOST_LIVE = "${HLX_PROD_SERVER_HOST_LIVE}"
 VERSION = "@@VERSION@@"
 CF_ACCOUNT_ID = "${CLOUDFLARE_ACCOUNT_ID}"
 RETURN_STACK_TRACES = "false"

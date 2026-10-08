@@ -214,7 +214,7 @@ export async function handleApiRequest(request, env) {
   if (!docName.startsWith(`${adminOrigin}/`)
       && !docName.startsWith('https://admin.entmseds-da.page/')
       && !docName.startsWith('https://stage-admin.entmseds-da.live/')
-      && !docName.startsWith('https://api.entmseds.live/')
+      && !docName.startsWith(`https://api.${env.HLX_PROD_SERVER_HOST_LIVE}/`)
       && !docName.startsWith('http://localhost:')) {
     return new Response('unable to get resource', { status: 404 });
   }
@@ -229,7 +229,8 @@ export async function handleApiRequest(request, env) {
     }
 
     const timingBeforeDaAdminHead = Date.now();
-    const initialReq = await getBackend(docName, env.daadmin).fetch(docName, opts);
+    const initialReq = await getBackend(docName, env.daadmin, env.HLX_PROD_SERVER_HOST_LIVE)
+      .fetch(docName, opts);
 
     timingDaAdminHeadDuration = Date.now() - timingBeforeDaAdminHead;
 
@@ -405,7 +406,7 @@ export class DocRoom extends DurableObject {
       // Helix does not yet report auth actions, so grant collaborators
       // read,write; otherwise honour what da-admin reported.
       // TODO: remove the isHelixDoc branch once Helix reports auth actions.
-      const authActions = isHelixDoc(docName)
+      const authActions = isHelixDoc(docName, this.env.HLX_PROD_SERVER_HOST_LIVE)
         ? 'read,write'
         : request.headers.get('X-auth-actions') ?? '';
 

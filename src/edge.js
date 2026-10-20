@@ -199,6 +199,7 @@ export async function handleApiRequest(request, env) {
   }
 
   const adminOrigin = env.ADMIN_ORIGIN || 'BAD_VAR_daCollab_ADMIN_ORIGIN';
+  const daDomain = env.DA_DOMAIN || 'BAD_VAR_daCollab_DA_DOMAIN';
 
   // We need to massage the path somewhat because on connections from localhost safari sends
   // a path with only one slash for some reason.
@@ -212,8 +213,8 @@ export async function handleApiRequest(request, env) {
 
   // Make sure we only work with the configured admin origin or localhost
   if (!docName.startsWith(`${adminOrigin}/`)
-      && !docName.startsWith('https://admin.entmseds-da.page/')
-      && !docName.startsWith('https://stage-admin.entmseds-da.live/')
+      && !docName.startsWith(`https://admin.${daDomain.replace(/\.live$/, '.page')}/`)
+      && !docName.startsWith(`https://stage-admin.${daDomain}/`)
       && !docName.startsWith(`https://api.${env.HLX_PROD_SERVER_HOST_LIVE}/`)
       && !docName.startsWith('http://localhost:')) {
     return new Response('unable to get resource', { status: 404 });

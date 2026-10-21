@@ -1015,7 +1015,7 @@ describe('Worker test suite', () => {
       headers: { 'x-error': 'da-admin internal error' },
     });
     const daadmin = { fetch: mockFetch };
-    const env = { daadmin };
+    const env = { daadmin, ADMIN_ORIGIN: 'https://admin.entmseds-da.live' };
 
     const res = await handleApiRequest(req, env);
     assert.equal(500, res.status);

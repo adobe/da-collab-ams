@@ -1,3 +1,45 @@
+## [1.8.1](https://github.com/adobe/da-collab/compare/v1.8.0...v1.8.1) (2026-10-15)
+
+
+### Bug Fixes
+
+* **hlx6:** Poll api.aem.live for changes ([#205](https://github.com/adobe/da-collab/issues/205)) ([f85785a](https://github.com/adobe/da-collab/commit/f85785ae98bba145863bbcc1b14dcecc58df0cd4))
+
+# [1.8.0](https://github.com/adobe/da-collab/compare/v1.7.11...v1.8.0) (2026-10-09)
+
+
+### Features
+
+* **shareddoc:** bump da-parser to 2.2.0 for link-img support ([#202](https://github.com/adobe/da-collab/issues/202)) ([7f47f88](https://github.com/adobe/da-collab/commit/7f47f884c9c2ab735acb5f3b985e78f1e01b9963))
+
+## [1.7.11](https://github.com/adobe/da-collab/compare/v1.7.10...v1.7.11) (2026-10-08)
+
+
+### Bug Fixes
+
+* **collab:** retry transient DO errors ([#204](https://github.com/adobe/da-collab/issues/204)) ([92aa796](https://github.com/adobe/da-collab/commit/92aa796d5f9a4f73ee032e8f59ceee20b14e6e19))
+
+## [1.7.10](https://github.com/adobe/da-collab/compare/v1.7.9...v1.7.10) (2026-09-15)
+
+
+### Bug Fixes
+
+* force redeploy after da-parser bump ([#201](https://github.com/adobe/da-collab/issues/201)) ([c123fac](https://github.com/adobe/da-collab/commit/c123fac1dd817e0fc56dc836cb7ffcd43087b504))
+
+## [1.7.9](https://github.com/adobe/da-collab/compare/v1.7.8...v1.7.9) (2026-09-02)
+
+
+### Bug Fixes
+
+* use single auth token for Helix Authorization header ([#197](https://github.com/adobe/da-collab/issues/197)) ([1a4f2e1](https://github.com/adobe/da-collab/commit/1a4f2e1aa18a570b3a9b03e32e1c15d345e3122e))
+
+## [1.7.8](https://github.com/adobe/da-collab/compare/v1.7.7...v1.7.8) (2026-08-27)
+
+
+### Bug Fixes
+
+* always use POST to write to Helix ([#193](https://github.com/adobe/da-collab/issues/193)) ([7b2f60b](https://github.com/adobe/da-collab/commit/7b2f60b2c04f5d9bcde0df650064a9e7f620a605))
+
 ## [1.7.7](https://github.com/adobe/da-collab/compare/v1.7.6...v1.7.7) (2026-08-19)
 
 

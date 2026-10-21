@@ -1,6 +1,6 @@
 {
   "name": "da-collab-ams",
-  "version": "1.7.7",
+  "version": "1.8.1",
   "description": "",
   "main": "src/edge.js",
   "type": "module",
@@ -26,7 +26,7 @@
   "author": "",
   "license": "Apache-2.0",
   "devDependencies": {
-    "@adobe/eslint-config-helix": "3.0.30",
+    "@adobe/eslint-config-helix": "3.0.31",
     "@semantic-release/changelog": "7.0.0",
     "@semantic-release/exec": "7.1.0",
     "@semantic-release/git": "11.0.1",
@@ -44,8 +44,8 @@
     "wrangler": "4.119.0"
   },
   "dependencies": {
+    "@adobe/da-parser": "^2.2.0",
     "@cloudflare/workers-types": "5.20260804.1",
-    "@adobe/da-parser": "^2.0.0",
     "lib0": "0.2.117",
     "y-protocols": "1.0.7",
     "yjs": "13.6.32"

@@ -28,8 +28,13 @@ import {
   showError, storeState, toHelixPath, updateHandler, WSSharedDoc,
 } from '../src/shareddoc.js';
 
-const HLX_PROD_SERVER_HOST_LIVE = process.env.HLX_PROD_SERVER_HOST_LIVE
-  || 'BAD_VAR_daCollab_HLX_PROD_SERVER_HOST_LIVE';
+// Expected Helix API host. The shareddoc tests call src (getBackend, persistence, …)
+// with env objects that do NOT carry HLX_PROD_SERVER_HOST_LIVE, so src uses its
+// fallback host. Keep the expectation equal to that fallback rather than reading
+// process.env: deploy tooling runs `npm test` with the target environment's .env
+// sourced, and reading it here made every Helix-path test fail on deploy while
+// passing in CI. Tests that pass HLX_PROD_SERVER_HOST_LIVE in env use this value too.
+const HLX_PROD_SERVER_HOST_LIVE = 'BAD_VAR_daCollab_HLX_PROD_SERVER_HOST_LIVE';
 
 function isSubArray(full, sub) {
   if (sub.length === 0) {

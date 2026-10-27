@@ -35,7 +35,12 @@ bindings = [{ name = "rooms", class_name = "DocRoom" }]
 
 [[migrations]]
 tag = "v1"
-new_classes = ["DocRoom"]
+# SQLite-backed: Cloudflare no longer allows creating key-value-backed Durable
+# Object namespaces on new accounts ("[code: 10099] … use a new_sqlite_classes
+# migration"). DocRoom only uses ctx.storage.deleteAll() and WebSocket
+# hibernation, both supported on SQLite-backed objects. Environments that already
+# applied v1 as KV-backed are unaffected (wrangler does not re-run an applied tag).
+new_sqlite_classes = ["DocRoom"]
 
 [dev]
 port = 8789
